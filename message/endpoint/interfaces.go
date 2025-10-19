@@ -1,0 +1,19 @@
+package endpoint
+
+import (
+	"context"
+
+	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
+)
+
+// InboundChannelAdapter defines the contract for inbound channel adapters that
+// receive messages from external sources.
+type InboundChannelAdapter interface {
+	ReferenceName() string
+	DeadLetterChannelName() string
+	AfterProcessors() []message.MessageHandler
+	BeforeProcessors() []message.MessageHandler
+	ReceiveMessage(ctx context.Context) (*message.Message, error)
+	RetryAttempts() []int
+	Close() error
+}
