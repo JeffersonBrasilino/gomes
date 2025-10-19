@@ -85,8 +85,8 @@ import (
     "syscall"
     "time"
 
-    "github.com/hex-api-go/pkg/core/infrastructure/gomes"
-    kafka "github.com/hex-api-go/pkg/core/infrastructure/gomes/channel/kafka"
+    "github.com/jeffersonbrasilino/gomes"
+    kafka "github.com/jeffersonbrasilino/gomes/channel/kafka"
 )
 
 func main() {

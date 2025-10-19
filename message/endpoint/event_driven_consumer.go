@@ -21,9 +21,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/container"
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message/handler"
+	"github.com/jeffersonbrasilino/gomes/container"
+	"github.com/jeffersonbrasilino/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message/handler"
 )
 
 // EventDrivenConsumerBuilder is responsible for building EventDrivenConsumer instances.

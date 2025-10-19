@@ -18,7 +18,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message"
 )
 
 // PointToPointReferenceName generates a standardized reference name for point-to-point

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message/handler"
+	"github.com/jeffersonbrasilino/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message/handler"
 )
 
 // mockConsumerChannel implements message.ConsumerChannel for tests.

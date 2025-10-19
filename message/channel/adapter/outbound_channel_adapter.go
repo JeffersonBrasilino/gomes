@@ -15,8 +15,8 @@ package adapter
 import (
 	"context"
 
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message/channel"
+	"github.com/jeffersonbrasilino/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message/channel"
 )
 
 // OutboundChannelMessageTranslator defines the contract for translating internal messages

@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message/channel"
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message/channel/adapter"
+	"github.com/jeffersonbrasilino/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message/channel"
+	"github.com/jeffersonbrasilino/gomes/message/channel/adapter"
 )
 
 // mockPublisherChannel implements message.PublisherChannel for tests.

@@ -15,8 +15,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/container"
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/container"
+	"github.com/jeffersonbrasilino/gomes/message"
 )
 
 type Dispatcher interface {

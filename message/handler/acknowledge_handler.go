@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message"
 )
 
 type ChannelMessageAcknowledgment interface {

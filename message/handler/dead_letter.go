@@ -17,7 +17,7 @@ import (
 	"encoding/json"
 	"log/slog"
 
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message"
 )
 
 // deadLetter implements the Dead Letter Channel pattern, routing failed messages

@@ -16,9 +16,9 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message/endpoint"
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message/handler"
+	"github.com/jeffersonbrasilino/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message/endpoint"
+	"github.com/jeffersonbrasilino/gomes/message/handler"
 )
 
 // EventBus provides event publishing capabilities for broadcasting events

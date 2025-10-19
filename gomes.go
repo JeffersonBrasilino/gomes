@@ -19,11 +19,11 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/bus"
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/container"
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message/endpoint"
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message/handler"
+	"github.com/jeffersonbrasilino/gomes/bus"
+	"github.com/jeffersonbrasilino/gomes/container"
+	"github.com/jeffersonbrasilino/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message/endpoint"
+	"github.com/jeffersonbrasilino/gomes/message/handler"
 )
 
 // Default channel names for the message system.

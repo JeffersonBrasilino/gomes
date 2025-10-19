@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message"
 )
 
 type dummyHandler struct {

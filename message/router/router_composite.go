@@ -15,7 +15,7 @@ package router
 import (
 	"context"
 
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message"
 )
 
 // router implements a composite router that processes messages through multiple

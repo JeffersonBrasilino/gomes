@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/container"
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/container"
+	"github.com/jeffersonbrasilino/gomes/message"
 )
 
 // TODO: URGENTE, REVISAR. refazer o polling consumer, provavlemente este started consumer não precisa mais.

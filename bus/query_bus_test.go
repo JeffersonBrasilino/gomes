@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/bus"
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/bus"
+	"github.com/jeffersonbrasilino/gomes/message"
 )
 
 type mockQDispatcher struct {

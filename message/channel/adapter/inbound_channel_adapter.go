@@ -15,8 +15,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message/handler"
+	"github.com/jeffersonbrasilino/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message/handler"
 )
 
 // InboundChannelMessageTranslator defines the contract for translating external messages

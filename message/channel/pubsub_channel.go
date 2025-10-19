@@ -17,7 +17,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message"
 )
 
 // PubSubChannel implements a publish-subscribe messaging channel where messages

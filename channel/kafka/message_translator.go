@@ -16,7 +16,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message"
 	"github.com/segmentio/kafka-go"
 )
 

@@ -1,8 +1,9 @@
 package container_test
 
 import (
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/container"
 	"testing"
+
+	"github.com/jeffersonbrasilino/gomes/container"
 )
 
 func TestGenericContainer_Set(t *testing.T) {

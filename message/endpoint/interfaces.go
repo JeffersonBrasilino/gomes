@@ -3,7 +3,7 @@ package endpoint
 import (
 	"context"
 
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message"
 )
 
 // InboundChannelAdapter defines the contract for inbound channel adapters that

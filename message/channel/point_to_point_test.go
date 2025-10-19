@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message/channel"
+	"github.com/jeffersonbrasilino/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message/channel"
 )
 
 func TestPointToPointReferenceName(t *testing.T) {

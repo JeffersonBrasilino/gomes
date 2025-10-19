@@ -15,7 +15,7 @@ package handler
 import (
 	"context"
 
-	"github.com/hex-api-go/pkg/core/infrastructure/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message"
 )
 
 // contextHandler wraps another message handler and provides context-aware

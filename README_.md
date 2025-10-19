@@ -20,7 +20,7 @@
 ## 📦 Instalação
 
 ```bash
-go get github.com/hex-api-go/pkg/core/infrastructure/gomes
+go get github.com/jeffersonbrasilino/gomes
 ```
 
 ## 🚀 Inicialização
@@ -30,7 +30,7 @@ O gomes requer uma sequência específica de inicialização para garantir o cor
 ```go
 import (
     "context"
-    "github.com/hex-api-go/pkg/core/infrastructure/gomes"
+    "github.com/jeffersonbrasilino/gomes"
 )
 
 func main() {
