@@ -16,23 +16,7 @@ import (
 	"context"
 
 	"github.com/jeffersonbrasilino/gomes/message"
-	"github.com/jeffersonbrasilino/gomes/message/channel"
 )
-
-// OutboundChannelMessageTranslator defines the contract for translating internal messages
-// to external system format.
-//
-// T represents the target message type for the external system.
-type OutboundChannelMessageTranslator[T any] interface {
-	// FromMessage converts an internal message to the target external format.
-	//
-	// Parameters:
-	//   - msg: The internal message to be translated
-	//
-	// Returns:
-	//   - T: The translated message in external format
-	FromMessage(msg *message.Message) (T, error)
-}
 
 // OutboundChannelAdapterBuilder provides a fluent interface for configuring
 // outbound channel adapters with various options like message translators,
@@ -212,16 +196,10 @@ func (
 //   - error: Any error that occurred during channel creation
 func (b *OutboundChannelAdapterBuilder[TMessageType]) BuildOutboundAdapter(
 	outboundAdapter message.PublisherChannel,
-) (*channel.PointToPointChannel, error) {
+) (*OutboundChannelAdapter, error) {
 
 	outboundHandler := NewOutboundChannelAdapter(outboundAdapter)
-
-	chn := channel.NewPointToPointChannel(b.referenceName)
-	chn.Subscribe(func(msg *message.Message) {
-		outboundHandler.Handle(msg.GetContext(), msg)
-	})
-
-	return chn, nil
+	return outboundHandler, nil
 }
 
 // Handle processes an outbound message by sending it through the configured publisher
@@ -235,20 +213,28 @@ func (b *OutboundChannelAdapterBuilder[TMessageType]) BuildOutboundAdapter(
 // Returns:
 //   - *message.Message: The processed message (same as input if successful)
 //   - error: Any error that occurred during message processing
-func (o *OutboundChannelAdapter) Handle(
+func (o *OutboundChannelAdapter) Send(
 	ctx context.Context,
 	msg *message.Message,
-) (*message.Message, error) {
+)  error {
 	err := o.outboundAdapter.Send(ctx, msg)
 	if msg.GetHeaders().ReplyChannel != nil {
-		o.publishOnInternalChannel(ctx, msg, err)
+		go o.publishOnInternalChannel(ctx, msg, err)
 	}
 
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return msg, nil
+	return nil
+}
+
+// Name returns the name of outbound channel adapter.
+//
+// Returns:
+//   - string: the topic name
+func (o *OutboundChannelAdapter) Name() string {
+	return o.outboundAdapter.Name()
 }
 
 // publishOnInternalChannel publishes a result message to the configured reply channel.
@@ -273,4 +259,17 @@ func (o *OutboundChannelAdapter) publishOnInternalChannel(
 		WithPayload(payloadMessage).
 		Build()
 	msg.GetHeaders().ReplyChannel.Send(ctx, resultMessage)
+}
+
+// Close closes the outbound channel adapter, releasing associated resources.
+//
+// Returns:
+//   - error: Error if closing the channel fails
+func (o *OutboundChannelAdapter) Close() error {
+	
+	closableChannel, ok := o.outboundAdapter.(ClosableChannel)
+	if !ok {
+		return nil
+	}
+	return closableChannel.Close()
 }

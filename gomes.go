@@ -22,6 +22,7 @@ import (
 	"github.com/jeffersonbrasilino/gomes/bus"
 	"github.com/jeffersonbrasilino/gomes/container"
 	"github.com/jeffersonbrasilino/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message/channel/adapter"
 	"github.com/jeffersonbrasilino/gomes/message/endpoint"
 	"github.com/jeffersonbrasilino/gomes/message/handler"
 )
@@ -34,20 +35,13 @@ var (
 
 // Global containers for managing system components.
 var (
-	outboundChannelBuilders = container.NewGenericContainer[string, BuildableComponent[message.PublisherChannel]]()
+	outboundChannelBuilders = container.NewGenericContainer[string, BuildableComponent[endpoint.OutboundChannelAdapter]]()
 	inboundChannelBuilders  = container.NewGenericContainer[string, BuildableComponent[endpoint.InboundChannelAdapter]]()
-	channelConnections      = container.NewGenericContainer[string, ChannelConnection]()
+	channelConnections      = container.NewGenericContainer[string, adapter.ChannelConnection]()
 	gomesContainer          = container.NewGenericContainer[any, any]()
 	activeEndpoints         = container.NewGenericContainer[string, any]()
+	actionHandlers          = container.NewGenericContainer[string, BuildableComponent[message.PublisherChannel]]()
 )
-
-// ChannelConnection defines the contract for managing channel connections
-// with connect and disconnect capabilities.
-type ChannelConnection interface {
-	ReferenceName() string
-	Connect() error
-	Disconnect() error
-}
 
 // BuildableComponent defines the contract for components that can be built
 // from a dependency container.
@@ -61,7 +55,7 @@ type BuildableComponent[T any] interface {
 //
 // Parameters:
 //   - publisher: the publisher channel builder to register
-func AddPublisherChannel(publisher BuildableComponent[message.PublisherChannel]) {
+func AddPublisherChannel(publisher BuildableComponent[endpoint.OutboundChannelAdapter]) {
 	if outboundChannelBuilders.Has(publisher.ReferenceName()) {
 		panic(
 			fmt.Sprintf(
@@ -119,7 +113,7 @@ func registerDefaultEndpoints(container container.Container[any, any]) {
 //
 // Parameters:
 //   - con: the channel connection to register
-func AddChannelConnection(con ChannelConnection) {
+func AddChannelConnection(con adapter.ChannelConnection) {
 	if channelConnections.Has(con.ReferenceName()) {
 		panic(
 			fmt.Sprintf(
@@ -199,7 +193,7 @@ func AddActionHandler[T handler.Action, U any](handlerAction handler.ActionHandl
 		)
 	}
 
-	outboundChannelBuilders.Set(
+	actionHandlers.Set(
 		action.Name(),
 		handler.NewActionHandleActivatorBuilder(
 			action.Name(),
@@ -208,13 +202,26 @@ func AddActionHandler[T handler.Action, U any](handlerAction handler.ActionHandl
 	)
 }
 
+func buildActionHandlers(container container.Container[any, any]) {
+	for _, v := range actionHandlers.GetAll() {
+		actionHandler, err := v.Build(container)
+		if err != nil {
+			return
+		}
+		container.Set(actionHandler.Name(), actionHandler)
+	}
+}
+
 // Start initializes the message system by building all registered components
 // and registering default endpoints.
 func Start() {
 	registerDefaultEndpoints(gomesContainer)
+	buildActionHandlers(gomesContainer)
 	buildChannelConnections(gomesContainer)
 	buildOutboundChannels(gomesContainer)
 	buildInboundChannels(gomesContainer)
+
+	fmt.Println("ALL COMPONENTS", gomesContainer.GetAll())
 }
 
 // CommandBus returns the default command bus instance.
@@ -363,14 +370,17 @@ func Shutdown() {
 		}
 	}
 
-	for _, v := range gomesContainer.GetAll() {
+	for k, v := range gomesContainer.GetAll() {
 		switch c := v.(type) {
 		case message.ConsumerChannel:
 			slog.Info("[message-system] close consumer channel", "name", c.Name())
 			c.Close()
 		case message.SubscriberChannel:
-			slog.Info("[message-system] close subscriber channel", "name", c.Name())
+			slog.Info("[message-system] unsubscribe channel", "name", c.Name())
 			c.Unsubscribe()
+		case endpoint.OutboundChannelAdapter:
+			slog.Info("[message-system] close outbound channel", "name", k)
+			c.Close()
 		}
 	}
 	slog.Info("[message-system] shutdown completed")

@@ -25,6 +25,10 @@ func (m *mockPublisherChannel) Name() string {
 	return "mockPublisherChannel"
 }
 
+func (m *mockPublisherChannel) Close() error{
+	return nil
+}
+
 // mockOutboundMessageHandler implements message.MessageHandler for tests.
 type mockOutboundMessageHandler struct{}
 
@@ -168,7 +172,7 @@ func TestOutboundChannelAdapter_Handle(t *testing.T) {
 				t.Errorf("Expected payload 'payload', got '%v'", m.GetPayload())
 			}
 		})
-		adapterInstance.Handle(context.Background(), msg)
+		adapterInstance.Send(context.Background(), msg)
 		t.Cleanup(func() {
 			replyChan.Close()
 		})
@@ -190,7 +194,7 @@ func TestOutboundChannelAdapter_Handle(t *testing.T) {
 				t.Errorf("Expected payload 'nil', got '%v'", m.GetPayload())
 			}
 		})
-		adapterInstance.Handle(context.Background(), msg)
+		adapterInstance.Send(context.Background(), msg)
 		t.Cleanup(func() {
 			replyChan.Close()
 		})
@@ -198,12 +202,9 @@ func TestOutboundChannelAdapter_Handle(t *testing.T) {
 	t.Run("send error", func(t *testing.T) {
 		t.Parallel()
 		pubChan.sendErr = errors.New("send error")
-		m, err := adapterInstance.Handle(ctx, msg)
+		err := adapterInstance.Send(ctx, msg)
 		if err == nil {
 			t.Error("Expected error from publisher, got nil")
-		}
-		if m != nil {
-			t.Error("Expected nil message on error")
 		}
 		pubChan.sendErr = nil
 	})
