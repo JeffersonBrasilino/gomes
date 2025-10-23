@@ -19,21 +19,6 @@ import (
 	"github.com/jeffersonbrasilino/gomes/message/handler"
 )
 
-// InboundChannelMessageTranslator defines the contract for translating external messages
-// to the internal format.
-//
-// T represents the external message type that needs to be translated.
-type InboundChannelMessageTranslator[T any] interface {
-	// ToMessage converts an external message to the internal message format.
-	//
-	// Parameters:
-	//   - msg: The external message to be translated
-	//
-	// Returns:
-	//   - *message.Message: The translated message in internal format
-	ToMessage(msg T) (*message.Message, error)
-}
-
 // InboundChannelAdapterBuilder provides a fluent interface for configuring
 // inbound channel adapters with various options like message translators,
 // dead letter channels, and interceptors.
