@@ -18,6 +18,7 @@ import (
 	"github.com/jeffersonbrasilino/gomes/container"
 	"github.com/jeffersonbrasilino/gomes/message"
 	"github.com/jeffersonbrasilino/gomes/message/channel/adapter"
+	"github.com/jeffersonbrasilino/gomes/message/endpoint"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -87,11 +88,11 @@ func NewOutboundChannelAdapter(
 //   - container: dependency container containing required components
 //
 // Returns:
-//   - message.PublisherChannel: configured publisher channel
+//   - endpoint.OutboundChannelAdapter: configured publisher channel
 //   - error: error if construction fails
 func (b *publisherChannelAdapterBuilder) Build(
 	container container.Container[any, any],
-) (message.PublisherChannel, error) {
+) (endpoint.OutboundChannelAdapter, error) {
 	con, err := container.Get(b.connectionReferenceName)
 
 	if err != nil {
@@ -143,4 +144,8 @@ func (a *outboundChannelAdapter) Send(ctx context.Context, msg *message.Message)
 	default:
 	}
 	return err
+}
+
+func (a *outboundChannelAdapter) Close() error{
+	return a.producer.Close()
 }

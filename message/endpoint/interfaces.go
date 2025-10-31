@@ -17,3 +17,20 @@ type InboundChannelAdapter interface {
 	RetryAttempts() []int
 	Close() error
 }
+
+type Dispatcher interface {
+	SendMessage(
+		ctx context.Context,
+		msg *message.Message,
+	) (any, error)
+
+	PublishMessage(
+		ctx context.Context,
+		msg *message.Message,
+	) error
+}
+
+type OutboundChannelAdapter interface {
+	Send(ctx context.Context, message *message.Message) error
+	Close() error
+}

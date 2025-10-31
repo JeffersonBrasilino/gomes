@@ -88,7 +88,7 @@ func (c *connection) Consumer(topic string, groupId string) *kafka.Reader {
 // Returns:
 //   - error: error if disconnection fails (typically nil)
 func (c *connection) Disconnect() error {
-	return nil
+	return c.producerInstance.Close()
 }
 
 // ReferenceName returns the connection name identifier.
