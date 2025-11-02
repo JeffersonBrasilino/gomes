@@ -220,8 +220,6 @@ func Start() {
 	buildChannelConnections(gomesContainer)
 	buildOutboundChannels(gomesContainer)
 	buildInboundChannels(gomesContainer)
-
-	fmt.Println("ALL COMPONENTS", gomesContainer.GetAll())
 }
 
 // CommandBus returns the default command bus instance.

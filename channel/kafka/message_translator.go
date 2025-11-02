@@ -14,7 +14,6 @@ package kafka
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/jeffersonbrasilino/gomes/message"
 	"github.com/segmentio/kafka-go"
@@ -78,98 +77,18 @@ func (m *MessageTranslator) FromMessage(msg *message.Message) (*kafka.Message, e
 // Returns:
 //   - *message.Message: the internal message (placeholder implementation)
 func (m *MessageTranslator) ToMessage(data *kafka.Message) (*message.Message, error) {
-	messageBuilder := message.NewMessageBuilder()
-	headersMap := map[string]func(value string) error{
-		"origin": func(value string) error {
-			messageBuilder.WithOrigin(value)
-			return nil
-		},
-		"route": func(value string) error {
-			messageBuilder.WithRoute(value)
-			return nil
-		},
-		"type": func(value string) error {
-			tp := m.chooseMessageType(value)
-			messageBuilder.WithMessageType(tp)
-			return nil
-		},
-		"timestamp": func(value string) error {
-			dt, err := time.Parse("2006-01-02 15:04:05", value)
-			if err != nil {
-				return err
-			}
-			messageBuilder.WithTimestamp(dt)
-			return nil
-		},
-		"replyChannel": func(value string) error {
-			messageBuilder.WithReplyChannelName(value)
-			return nil
-		},
-		"customHeaders": func(value string) error {
-			ch, err := m.makeCustomHeaders(value)
-			if err != nil {
-				return err
-			}
-			messageBuilder.WithCustomHeader(ch)
-			return nil
-		},
-		"correlationId": func(value string) error {
-			messageBuilder.WithCorrelationId(value)
-			return nil
-		},
-		"channelName": func(value string) error {
-			messageBuilder.WithChannelName(value)
-			return nil
-		},
-		"messageId": func(value string) error {
-			messageBuilder.WithMessageId(value)
-			return nil
-		},
-		"version": func(value string) error {
-			messageBuilder.WithVersion(value)
-			return nil
-		},
-	}
-
+	headers := map[string]string{}
 	for _, h := range data.Headers {
-		key := string(h.Key)
-		if headersMap[key] == nil {
-			continue
-		}
-
-		if string(h.Value) == "" {
-			continue
-		}
-
-		err := headersMap[key](string(h.Value))
-		if err != nil {
-			return nil, fmt.Errorf("[kafka-message-translator] header converter error: %v - %v", key, err.Error())
-		}
+		headers[h.Key] = string(h.Value)
+	}
+	
+	messageBuilder, err := message.NewMessageBuilderFromHeaders(headers)
+	if err != nil {
+		return nil, fmt.Errorf("[rabbitMQ-message-translator] header converter error: %v", err.Error())
 	}
 
 	messageBuilder.WithPayload(data.Value)
 	messageBuilder.WithRawMessage(data)
 	msg := messageBuilder.Build()
 	return msg, nil
-}
-
-func (m *MessageTranslator) chooseMessageType(value string) message.MessageType {
-	switch value {
-	case "Command":
-		return message.Command
-	case "Query":
-		return message.Query
-	case "Event":
-		return message.Event
-	}
-	return message.Document
-}
-
-func (m *MessageTranslator) makeCustomHeaders(value string) (message.CustomHeaders, error) {
-	var customHeaders message.CustomHeaders
-	errCh := json.Unmarshal([]byte(value), &customHeaders)
-	if errCh != nil {
-		return nil, errCh
-	}
-	return customHeaders, nil
 }
