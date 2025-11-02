@@ -16,6 +16,8 @@ package message
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -70,6 +72,99 @@ func NewMessageBuilderFromMessage(msg *Message) *MessageBuilder {
 		version:       msg.GetHeaders().Version,
 		rawMessage:    msg.GetRawMessage(),
 	}
+}
+
+func NewMessageBuilderFromHeaders(headers map[string]string) (*MessageBuilder, error) {
+	messageBuilder := &MessageBuilder{}
+	headersMap := map[string]func(value string) error{
+		"origin": func(value string) error {
+			messageBuilder.WithOrigin(value)
+			return nil
+		},
+		"route": func(value string) error {
+			messageBuilder.WithRoute(value)
+			return nil
+		},
+		"type": func(value string) error {
+			tp := messageBuilder.chooseMessageType(value)
+			messageBuilder.WithMessageType(tp)
+			return nil
+		},
+		"timestamp": func(value string) error {
+			dt, err := time.Parse("2006-01-02 15:04:05", value)
+			if err != nil {
+				return err
+			}
+			messageBuilder.WithTimestamp(dt)
+			return nil
+		},
+		"replyChannel": func(value string) error {
+			messageBuilder.WithReplyChannelName(value)
+			return nil
+		},
+		"customHeaders": func(value string) error {
+			ch, err := messageBuilder.makeCustomHeaders(value)
+			if err != nil {
+				return err
+			}
+			messageBuilder.WithCustomHeader(ch)
+			return nil
+		},
+		"correlationId": func(value string) error {
+			messageBuilder.WithCorrelationId(value)
+			return nil
+		},
+		"channelName": func(value string) error {
+			messageBuilder.WithChannelName(value)
+			return nil
+		},
+		"messageId": func(value string) error {
+			messageBuilder.WithMessageId(value)
+			return nil
+		},
+		"version": func(value string) error {
+			messageBuilder.WithVersion(value)
+			return nil
+		},
+	}
+
+	for k, h := range headers {
+		if headersMap[k] == nil {
+			continue
+		}
+
+		if h == "" {
+			continue
+		}
+
+		err := headersMap[k](h)
+		if err != nil {
+			return nil, fmt.Errorf("[kafka-message-translator] header converter error: %v - %v", k, err.Error())
+		}
+	}
+
+	return messageBuilder, nil
+}
+
+func (b *MessageBuilder) chooseMessageType(value string) MessageType {
+	switch value {
+	case "Command":
+		return Command
+	case "Query":
+		return Query
+	case "Event":
+		return Event
+	}
+	return Document
+}
+
+func (b *MessageBuilder) makeCustomHeaders(value string) (CustomHeaders, error) {
+	var customHeaders CustomHeaders
+	errCh := json.Unmarshal([]byte(value), &customHeaders)
+	if errCh != nil {
+		return nil, errCh
+	}
+	return customHeaders, nil
 }
 
 // WithPayload sets the message payload.

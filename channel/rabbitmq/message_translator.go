@@ -47,6 +47,23 @@ func (m *MessageTranslator) FromMessage(msg *message.Message) (*amqp.Publishing,
 	}, nil
 }
 
-func (m *MessageTranslator) ToMessage(msg any) (*message.Message, error) {
-	return nil, nil
+func (m *MessageTranslator) ToMessage(msg amqp.Delivery) (*message.Message, error) {
+	headers := map[string]string{}
+	for k, h := range msg.Headers {
+		if strVal, ok := h.(string); ok {
+			headers[k] = strVal
+		}
+	}
+
+	messageBuilder, err := message.NewMessageBuilderFromHeaders(headers)
+	if err != nil {
+		return nil, fmt.Errorf("[rabbitMQ-message-translator] header converter error: %v", err.Error())
+	}
+
+	messageBuilder.WithPayload(msg.Body)
+	messageBuilder.WithRawMessage(msg)
+	buildedMessage := messageBuilder.Build()
+	
+	return buildedMessage, nil
 }
+
