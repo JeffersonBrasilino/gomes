@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	amqp "github.com/rabbitmq/amqp091-go"
-	"github.com/wagslane/go-rabbitmq"
 )
 
 type (
@@ -74,10 +73,6 @@ func (t exchangeType) Type() string {
 
 func (c *connection) Connect() error {
 	con, err := amqp.Dial(fmt.Sprintf("amqp://%s", c.host))
-	/* con, err := rabbitmq.NewConn(
-		fmt.Sprintf("amqp://%s", c.host),
-		rabbitmq.WithConnectionOptionsLogging,
-	) */
 	if err != nil {
 		return err
 	}
@@ -119,16 +114,8 @@ func (c *connection) Producer(
 	return ch, nil
 }
 
-func (c *connection) Consumer(queueName string) *rabbitmq.Consumer {
-	/* consumer, _ := rabbitmq.NewConsumer(
-		c.conn,
-		queueName,
-		rabbitmq.WithConsumerOptionsRoutingKey("my_routing_key"),
-		rabbitmq.WithConsumerOptionsExchangeName("events"),
-		rabbitmq.WithConsumerOptionsExchangeDeclare,
-	)
-	return consumer */
-	return nil
+func (c *connection) Consumer(queueName string) (*amqp.Channel, error) {
+	return c.conn.Channel()
 }
 
 func (c *connection) Disconnect() error {

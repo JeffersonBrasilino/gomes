@@ -8,13 +8,13 @@ import (
 	"github.com/jeffersonbrasilino/gomes/message"
 	"github.com/jeffersonbrasilino/gomes/message/channel/adapter"
 	"github.com/jeffersonbrasilino/gomes/message/endpoint"
-	"github.com/wagslane/go-rabbitmq"
+	"github.com/rabbitmq/amqp091-go"
 )
 
 // consumerChannelAdapterBuilder provides a builder pattern for creating
-// RabbitMQ inbound channel adapters with connection and topic configuration.
+// RabbitMQ inbound channel adapters with connection and queue configuration.
 type consumerChannelAdapterBuilder struct {
-	*adapter.InboundChannelAdapterBuilder[any]
+	*adapter.InboundChannelAdapterBuilder[amqp091.Delivery]
 	connectionReferenceName string
 	consumerName            string
 }
@@ -22,9 +22,9 @@ type consumerChannelAdapterBuilder struct {
 // inboundChannelAdapter implements the InboundChannelAdapter interface for RabbitMQ,
 // providing message consumption capabilities through a RabbitMQ consumer.
 type inboundChannelAdapter struct {
-	consumer          *rabbitmq.Consumer
-	topic             string
-	messageTranslator adapter.InboundChannelMessageTranslator[any]
+	consumer          *amqp091.Channel
+	queue             string
+	messageTranslator adapter.InboundChannelMessageTranslator[amqp091.Delivery]
 	messageChannel    chan *message.Message
 	errorChannel      chan error
 	ctx               context.Context
@@ -36,7 +36,7 @@ type inboundChannelAdapter struct {
 //
 // Parameters:
 //   - connectionReferenceName: reference name for the RabbitMQ connection
-//   - queueName: the RabbitMQ topic to consume messages from
+//   - queueName: the RabbitMQ queue to consume messages from
 //   - consumerName: the consumer group name
 //
 // Returns:
@@ -62,20 +62,20 @@ func NewConsumerChannelAdapterBuilder(
 //
 // Parameters:
 //   - consumer: the RabbitMQ consumer for receiving messages
-//   - topic: the RabbitMQ topic name
+//   - queue: the RabbitMQ queue name
 //   - messageTranslator: translator for converting RabbitMQ messages to internal format
 //
 // Returns:
 //   - *inboundChannelAdapter: configured inbound channel adapter
 func NewInboundChannelAdapter(
-	consumer *rabbitmq.Consumer,
-	topic string,
-	messageTranslator adapter.InboundChannelMessageTranslator[any],
+	consumer *amqp091.Channel,
+	queue string,
+	messageTranslator adapter.InboundChannelMessageTranslator[amqp091.Delivery],
 ) *inboundChannelAdapter {
 	ctx, cancel := context.WithCancel(context.Background())
 	adp := &inboundChannelAdapter{
 		consumer:          consumer,
-		topic:             topic,
+		queue:             queue,
 		messageTranslator: messageTranslator,
 		messageChannel:    make(chan *message.Message),
 		errorChannel:      make(chan error),
@@ -106,20 +106,27 @@ func (c *consumerChannelAdapterBuilder) Build(
 		)
 	}
 
-	consumer := con.(*connection).Consumer(c.ReferenceName())
+	consumer, err := con.(*connection).Consumer(c.ReferenceName())
+	if err != nil {
+		return nil, fmt.Errorf(
+			"[RabbitMQ-inbound-channel] consumer %s could not be created: %s",
+			c.connectionReferenceName,
+			err.Error(),
+		)
+	}
 	adapter := NewInboundChannelAdapter(consumer, c.ReferenceName(), c.MessageTranslator())
 	return c.InboundChannelAdapterBuilder.BuildInboundAdapter(adapter), nil
 }
 
-// Name returns the topic name of the RabbitMQ inbound channel adapter.
+// Name returns the queue name of the RabbitMQ inbound channel adapter.
 //
 // Returns:
-//   - string: the topic name
+//   - string: the queue name
 func (a *inboundChannelAdapter) Name() string {
-	return a.topic
+	return a.queue
 }
 
-// Receive receives a message from the RabbitMQ topic.
+// Receive receives a message from the RabbitMQ queue.
 //
 // Parameters:
 //   - ctx: context
@@ -153,9 +160,20 @@ func (a *inboundChannelAdapter) Close() error {
 	return nil
 }
 
-// subscribeOnTopic subscribes to the RabbitMQ topic and processes incoming messages.
+// subscribeOnqueue subscribes to the RabbitMQ queue and processes incoming messages.
 // This method runs in a separate goroutine and continuously polls for messages.
 func (a *inboundChannelAdapter) subscribeOnQueue() {
+
+	rabbitmqMessages, err := a.consumer.Consume(
+		a.queue,
+		"",
+		false,
+		false,
+		false,
+		false,
+		nil,
+	)
+
 	for {
 		select {
 		case <-a.ctx.Done():
@@ -163,10 +181,7 @@ func (a *inboundChannelAdapter) subscribeOnQueue() {
 		default:
 		}
 
-		err := a.consumer.Run(func(d rabbitmq.Delivery) rabbitmq.Action{
-			fmt.Printf("consumed: %v", string(d.Body)) 
-			return rabbitmq.Ack
-		})
+		msg := <-rabbitmqMessages
 
 		if err != nil {
 			if err == context.Canceled {
@@ -175,15 +190,22 @@ func (a *inboundChannelAdapter) subscribeOnQueue() {
 			a.errorChannel <- err
 		}
 
-		/* message, translateErr := a.messageTranslator.ToMessage(nil)
+		message, translateErr := a.messageTranslator.ToMessage(msg)
 		if translateErr != nil {
 			a.errorChannel <- translateErr
-		} */
+		}
 
 		select {
 		case <-a.ctx.Done():
 			return
-		case a.messageChannel <- nil:
+		case a.messageChannel <- message:
 		}
 	}
+}
+
+func (a *inboundChannelAdapter) CommitMessage(msg *message.Message) error {
+	if externalMessage, ok := msg.GetRawMessage().(amqp091.Delivery); ok {
+		return externalMessage.Ack(false)
+	}
+	return fmt.Errorf("[rabbitmq-inbound-channel] failed to commit message")
 }
