@@ -11,6 +11,7 @@
   - [Padrões de Consumo](#-padrões-de-consumo)
   - [Resiliência](#-resiliência)
   - [Kafka](#-kafka)
+  - [RabbitMQ](#-rabbitmq)
 
 ## 🎯 Visão Geral
 
@@ -1299,13 +1300,421 @@ func main() {
 }
 ```
 
-### Considerações de Performance
+### 🐰 RabbitMQ
+
+O driver RabbitMQ implementa a integração completa com RabbitMQ (Advanced Message Queuing Protocol), fornecendo adaptadores para publicação e consumo de mensagens com suporte a todas as funcionalidades do gomes. O driver suporta tanto o padrão de filas (Work Queues) quanto o padrão de exchanges com routing keys.
+
+#### Configuração da Conexão
+
+##### Exemplo de Configuração Básica
+
+```go
+// Crie uma conexão RabbitMQ (singleton pattern)
+connection := rabbitmq.NewConnection("defaultConRabbitMQ", "localhost:5672")
+
+// Registre a conexão no sistema
+gomes.AddChannelConnection(connection)
+
+// Conecte ao RabbitMQ
+err := connection.Connect()
+if err != nil {
+    log.Fatal("Failed to connect to RabbitMQ:", err)
+}
+```
+
+##### Configurações Avançadas
+
+```go
+// Configuração com credenciais e virtual host
+connection := rabbitmq.NewConnection(
+    "production-rabbitmq",
+    "user:password@rabbitmq.example.com:5672/vhost",
+)
+
+// Ou apenas com host
+connection := rabbitmq.NewConnection(
+    "defaultConRabbitMQ",
+    "localhost:5672",
+)
+```
+
+#### Publisher Channel (Publicação)
+
+O driver RabbitMQ suporta dois padrões de publicação:
+
+1. **ProducerQueue**: Publica diretamente para uma fila (Work Queues pattern)
+2. **ProducerExchange**: Publica para uma exchange com routing keys (Pub/Sub pattern)
+
+##### Configuração do Publisher - Work Queues (Padrão)
+
+```go
+// Crie um publisher channel para fila (padrão)
+publisherChannel := rabbitmq.NewPublisherChannelAdapterBuilder(
+    "defaultConRabbitMQ",        // Nome da conexão
+    "gomes.queue",               // Nome da fila de destino
+)
+
+// Registre o canal
+gomes.AddPublisherChannel(publisherChannel)
+
+// Use o canal através dos buses
+commandBus := gomes.CommandBusByChannel("gomes.queue")
+queryBus := gomes.QueryBusByChannel("gomes.queue")
+eventBus := gomes.EventBusByChannel("gomes.queue")
+```
+
+##### Configuração do Publisher - Exchange (Pub/Sub)
+
+```go
+// Crie um publisher channel para exchange
+publisherChannel := rabbitmq.NewPublisherChannelAdapterBuilder(
+    "defaultConRabbitMQ",        // Nome da conexão
+    "gomes.exchange",            // Nome da exchange
+)
+
+// Configure como exchange
+publisherChannel.WithChannelType(rabbitmq.ProducerExchange)
+
+// Configure o tipo de exchange (Direct, Fanout, Topic, Headers)
+publisherChannel.WithExchangeType(rabbitmq.ExchangeTopic)
+
+// Configure a routing key para roteamento de mensagens
+publisherChannel.WithExchangeRoutingKeys("user.created")
+
+// Registre o canal
+gomes.AddPublisherChannel(publisherChannel)
+
+// Use o canal através dos buses
+eventBus := gomes.EventBusByChannel("gomes.exchange")
+```
+
+##### Tipos de Exchange Disponíveis
+
+O driver RabbitMQ suporta os seguintes tipos de exchange:
+
+- **ExchangeDirect**: Roteamento direto baseado na routing key exata
+- **ExchangeFanout**: Distribui mensagens para todas as filas conectadas (broadcast)
+- **ExchangeTopic**: Roteamento baseado em padrões de routing key (wildcards)
+- **ExchangeHeaders**: Roteamento baseado em headers da mensagem
+
+```go
+// Exemplo: Exchange Fanout (broadcast)
+publisherChannel := rabbitmq.NewPublisherChannelAdapterBuilder(
+    "defaultConRabbitMQ",
+    "notifications.exchange",
+)
+publisherChannel.WithChannelType(rabbitmq.ProducerExchange)
+publisherChannel.WithExchangeType(rabbitmq.ExchangeFanout)
+// Não precisa de routing key para Fanout
+
+// Exemplo: Exchange Topic (roteamento por padrões)
+publisherChannel := rabbitmq.NewPublisherChannelAdapterBuilder(
+    "defaultConRabbitMQ",
+    "events.exchange",
+)
+publisherChannel.WithChannelType(rabbitmq.ProducerExchange)
+publisherChannel.WithExchangeType(rabbitmq.ExchangeTopic)
+publisherChannel.WithExchangeRoutingKeys("user.*.created") // Wildcard pattern
+```
+
+##### Tradução de Mensagens
+
+O sistema automaticamente traduz mensagens internas para o formato RabbitMQ:
+
+```go
+// Mensagem interna
+message := message.NewMessageBuilder().
+    WithMessageType(message.Command).
+    WithPayload(CreateUserCommand{Username: "john", Password: "123"}).
+    WithHeaders(map[string]string{"correlationId": "123"}).
+    Build()
+
+// Tradução automática para RabbitMQ
+rabbitmqMessage := translator.FromMessage(message)
+// Resultado: amqp.Publishing com headers, content-type e body JSON
+```
+
+#### Consumer Channel (Consumo)
+
+##### Configuração do Consumer
+
+```go
+// Crie um consumer channel para fila
+consumerChannel := rabbitmq.NewConsumerChannelAdapterBuilder(
+    "defaultConRabbitMQ",        // Nome da conexão
+    "gomes.queue",               // Nome da fila de origem
+    "test_consumer",             // Nome do consumer (opcional)
+)
+
+// Configure resiliência
+consumerChannel.WithRetryTimes(2_000, 3_000)  // Retry com intervalos
+consumerChannel.WithDeadLetterChannelName("gomes.dlq")  // DLQ
+
+// Registre o canal
+gomes.AddConsumerChannel(consumerChannel)
+```
+
+##### Consumo de Filas com Exchange
+
+Para consumir mensagens de uma fila que está vinculada a uma exchange:
+
+1. Configure a exchange e as filas no RabbitMQ (via código ou management UI)
+2. Configure o consumer apontando para a fila específica:
+
+```go
+// Consome da fila "user.created.notifications" que está vinculada à exchange
+consumerChannel := rabbitmq.NewConsumerChannelAdapterBuilder(
+    "defaultConRabbitMQ",
+    "user.created.notifications",  // Nome da fila (não da exchange)
+    "notification_consumer",
+)
+consumerChannel.WithRetryTimes(2_000, 3_000)
+gomes.AddConsumerChannel(consumerChannel)
+```
+
+#### Gerenciamento de Conexões
+
+##### Singleton Pattern
+
+O driver RabbitMQ usa singleton pattern para reutilizar conexões:
+
+```go
+// Primeira chamada cria a conexão
+conn1 := rabbitmq.NewConnection("defaultConRabbitMQ", "localhost:5672")
+
+// Segunda chamada retorna a mesma instância
+conn2 := rabbitmq.NewConnection("defaultConRabbitMQ", "localhost:5672")
+
+// conn1 == conn2 (mesma instância)
+```
+
+##### Métodos da Conexão
+
+- **`Connect()`**: Estabelece conexão com o broker RabbitMQ
+- **`Producer(channelName, channelType, exchangeType)`**: Cria producer para fila ou exchange
+- **`Consumer(queueName)`**: Cria consumer para fila específica
+- **`Disconnect()`**: Fecha conexão e libera recursos
+- **`ReferenceName()`**: Retorna nome de referência da conexão
+
+#### Tradução de Mensagens
+
+##### FromMessage (Interna → RabbitMQ)
+
+```go
+func (m *MessageTranslator) FromMessage(msg *message.Message) (*amqp.Publishing, error) {
+    // Serializa headers
+    headersMap, err := msg.GetHeaders().ToMap()
+    if err != nil {
+        return nil, err
+    }
+
+    // Converte headers para formato RabbitMQ Table
+    headers := amqp.Table{}
+    for k, v := range headersMap {
+        headers[k] = v
+    }
+
+    // Serializa payload
+    payload, err := json.Marshal(msg.GetPayload())
+    if err != nil {
+        return nil, err
+    }
+
+    return &amqp.Publishing{
+        ContentType: "application/json",
+        Headers:     headers,
+        Body:        payload,
+    }, nil
+}
+```
+
+##### ToMessage (RabbitMQ → Interna)
+
+```go
+func (m *MessageTranslator) ToMessage(msg amqp.Delivery) (*message.Message, error) {
+    // Converte headers RabbitMQ para headers internos
+    headers := map[string]string{}
+    for k, h := range msg.Headers {
+        if strVal, ok := h.(string); ok {
+            headers[k] = strVal
+        }
+    }
+
+    // Cria mensagem interna a partir dos headers
+    messageBuilder, err := message.NewMessageBuilderFromHeaders(headers)
+    if err != nil {
+        return nil, err
+    }
+
+    // Adiciona payload e mensagem raw
+    messageBuilder.WithPayload(msg.Body)
+    messageBuilder.WithRawMessage(msg)
+
+    return messageBuilder.Build(), nil
+}
+```
+
+#### Exemplo Completo de Uso - Work Queues
+
+```go
+func main() {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    // 1. Configure conexão RabbitMQ
+    gomes.AddChannelConnection(
+        rabbitmq.NewConnection("defaultConRabbitMQ", "localhost:5672"),
+    )
+
+    // 2. Configure publisher para fila
+    publisherChannel := rabbitmq.NewPublisherChannelAdapterBuilder(
+        "defaultConRabbitMQ",
+        "gomes.queue",
+    )
+    gomes.AddPublisherChannel(publisherChannel)
+
+    // 3. Configure DLQ publisher
+    dlqPublisherChannel := rabbitmq.NewPublisherChannelAdapterBuilder(
+        "defaultConRabbitMQ",
+        "gomes.dlq",
+    )
+    gomes.AddPublisherChannel(dlqPublisherChannel)
+
+    // 4. Configure consumer com resiliência
+    consumerChannel := rabbitmq.NewConsumerChannelAdapterBuilder(
+        "defaultConRabbitMQ",
+        "gomes.queue",
+        "test_consumer",
+    )
+    consumerChannel.WithRetryTimes(2_000, 3_000)
+    consumerChannel.WithDeadLetterChannelName("gomes.dlq")
+
+    gomes.AddConsumerChannel(consumerChannel)
+
+    // 5. Registre handlers
+    gomes.AddActionHandler(&CreateUserHandler{})
+
+    // 6. Inicie o sistema
+    gomes.Start()
+
+    // 7. Configure event-driven consumer
+    consumer, err := gomes.EventDrivenConsumer("test_consumer")
+    if err != nil {
+        panic(err)
+    }
+
+    // 8. Execute consumer
+    go consumer.WithAmountOfProcessors(2).
+        WithMessageProcessingTimeout(30000).
+        WithStopOnError(false).
+        Run(ctx)
+
+    // 9. Publique mensagens
+    commandBus := gomes.CommandBusByChannel("gomes.queue")
+    commandBus.SendAsync(ctx, &CreateUserCommand{
+        Username: "john_doe",
+        Password: "secure_password",
+    })
+
+    // 10. Graceful shutdown
+    <-ctx.Done()
+    gomes.Shutdown()
+}
+```
+
+#### Exemplo Completo de Uso - Exchange (Pub/Sub)
+
+```go
+func main() {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    // 1. Configure conexão RabbitMQ
+    gomes.AddChannelConnection(
+        rabbitmq.NewConnection("defaultConRabbitMQ", "localhost:5672"),
+    )
+
+    // 2. Configure publisher para exchange (Topic)
+    publisherChannel := rabbitmq.NewPublisherChannelAdapterBuilder(
+        "defaultConRabbitMQ",
+        "events.exchange",
+    )
+    publisherChannel.WithChannelType(rabbitmq.ProducerExchange)
+    publisherChannel.WithExchangeType(rabbitmq.ExchangeTopic)
+    publisherChannel.WithExchangeRoutingKeys("user.created")
+
+    gomes.AddPublisherChannel(publisherChannel)
+
+    // 3. Configure DLQ publisher
+    dlqPublisherChannel := rabbitmq.NewPublisherChannelAdapterBuilder(
+        "defaultConRabbitMQ",
+        "events.dlq",
+    )
+    gomes.AddPublisherChannel(dlqPublisherChannel)
+
+    // 4. Configure consumer para fila vinculada à exchange
+    // Nota: A fila deve estar criada e vinculada à exchange no RabbitMQ
+    consumerChannel := rabbitmq.NewConsumerChannelAdapterBuilder(
+        "defaultConRabbitMQ",
+        "user.created.notifications",  // Nome da fila (não da exchange)
+        "notification_consumer",
+    )
+    consumerChannel.WithRetryTimes(2_000, 3_000)
+    consumerChannel.WithDeadLetterChannelName("events.dlq")
+
+    gomes.AddConsumerChannel(consumerChannel)
+
+    // 5. Registre handlers
+    gomes.AddActionHandler(&UserCreatedNotificationHandler{})
+
+    // 6. Inicie o sistema
+    gomes.Start()
+
+    // 7. Configure event-driven consumer
+    consumer, err := gomes.EventDrivenConsumer("notification_consumer")
+    if err != nil {
+        panic(err)
+    }
+
+    // 8. Execute consumer
+    go consumer.WithAmountOfProcessors(2).
+        WithMessageProcessingTimeout(30000).
+        WithStopOnError(false).
+        Run(ctx)
+
+    // 9. Publique eventos na exchange
+    eventBus := gomes.EventBusByChannel("events.exchange")
+    eventBus.Publish(ctx, &UserCreatedEvent{
+        UserID:    "123",
+        Username:  "john_doe",
+        Timestamp: time.Now(),
+    })
+
+    // 10. Graceful shutdown
+    <-ctx.Done()
+    gomes.Shutdown()
+}
+```
+
+#### Diferenças entre RabbitMQ e Kafka
+
+| Aspecto                    | RabbitMQ                  | Kafka                        |
+| -------------------------- | ------------------------- | ---------------------------- |
+| **Modelo de Comunicação**  | Filas e Exchanges         | Tópicos e Partições          |
+| **Routing**                | Routing keys e bindings   | Partições e consumer groups  |
+| **Delivery Semântica**     | At-least-once por padrão  | At-least-once / Exactly-once |
+| **Mensagens Persistentes** | Opcional (durable queues) | Sempre persistentes          |
+| **Padrões Suportados**     | Work Queues, Pub/Sub      | Pub/Sub, Stream Processing   |
+| **Conexão**                | String única (host:port)  | Array de brokers             |
+| **Complexidade**           | Menor para casos simples  | Maior, mas mais poderoso     |
+
+#### Considerações de Performance
 
 - **Connection Pooling**: Reutilização de conexões para melhor performance
-- **Batch Processing**: Suporte a processamento em lote
-- **Compression**: Compressão automática de mensagens grandes
-- **Partitioning**: Distribuição automática por partições
-- **Offset Management**: Gerenciamento automático de offsets
+- **Channel Reuse**: Canais RabbitMQ são reutilizados quando possível
+- **Message Acknowledgments**: Gerenciamento automático de ACKs para garantia de entrega
+- **Durable Queues/Exchanges**: Suporte a filas e exchanges duráveis para persistência
+- **Prefetch Count**: Configuração automática para controle de throughput
 
 ### Monitoramento e Debug
 
