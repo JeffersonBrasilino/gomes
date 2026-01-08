@@ -19,6 +19,7 @@ import (
 	"github.com/jeffersonbrasilino/gomes/message"
 	"github.com/jeffersonbrasilino/gomes/message/channel/adapter"
 	"github.com/jeffersonbrasilino/gomes/message/endpoint"
+	"github.com/jeffersonbrasilino/gomes/otel"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -40,6 +41,7 @@ type inboundChannelAdapter struct {
 	errorChannel      chan error
 	ctx               context.Context
 	cancelCtx         context.CancelFunc
+	otelTrace         otel.OtelTrace
 }
 
 // NewConsumerChannelAdapterBuilder creates a new Kafka consumer channel
@@ -92,6 +94,7 @@ func NewInboundChannelAdapter(
 		errorChannel:      make(chan error),
 		ctx:               ctx,
 		cancelCtx:         cancel,
+		otelTrace:         otel.InitTrace("kafka-inbound-channel-adapter"),
 	}
 	go adp.subscribeOnTopic()
 	return adp
@@ -183,10 +186,11 @@ func (a *inboundChannelAdapter) subscribeOnTopic() {
 		}
 
 		message, translateErr := a.messageTranslator.ToMessage(&msg)
+
 		if translateErr != nil {
 			a.errorChannel <- translateErr
 		}
-
+		
 		select {
 		case <-a.ctx.Done():
 			return

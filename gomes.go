@@ -25,22 +25,19 @@ import (
 	"github.com/jeffersonbrasilino/gomes/message/channel/adapter"
 	"github.com/jeffersonbrasilino/gomes/message/endpoint"
 	"github.com/jeffersonbrasilino/gomes/message/handler"
+	"github.com/jeffersonbrasilino/gomes/otel"
 )
 
 // Default channel names for the message system.
 var (
 	defaultCommandChannelName = "default.channel.command"
 	defaultQueryChannelName   = "default.channel.query"
-)
-
-// Global containers for managing system components.
-var (
-	outboundChannelBuilders = container.NewGenericContainer[string, BuildableComponent[endpoint.OutboundChannelAdapter]]()
-	inboundChannelBuilders  = container.NewGenericContainer[string, BuildableComponent[endpoint.InboundChannelAdapter]]()
-	channelConnections      = container.NewGenericContainer[string, adapter.ChannelConnection]()
-	gomesContainer          = container.NewGenericContainer[any, any]()
-	activeEndpoints         = container.NewGenericContainer[string, any]()
-	actionHandlers          = container.NewGenericContainer[string, BuildableComponent[message.PublisherChannel]]()
+	outboundChannelBuilders   = container.NewGenericContainer[string, BuildableComponent[endpoint.OutboundChannelAdapter]]()
+	inboundChannelBuilders    = container.NewGenericContainer[string, BuildableComponent[endpoint.InboundChannelAdapter]]()
+	channelConnections        = container.NewGenericContainer[string, adapter.ChannelConnection]()
+	gomesContainer            = container.NewGenericContainer[any, any]()
+	activeEndpoints           = container.NewGenericContainer[string, any]()
+	actionHandlers            = container.NewGenericContainer[string, BuildableComponent[message.PublisherChannel]]()
 )
 
 // BuildableComponent defines the contract for components that can be built
@@ -55,16 +52,15 @@ type BuildableComponent[T any] interface {
 //
 // Parameters:
 //   - publisher: the publisher channel builder to register
-func AddPublisherChannel(publisher BuildableComponent[endpoint.OutboundChannelAdapter]) {
+func AddPublisherChannel(publisher BuildableComponent[endpoint.OutboundChannelAdapter]) error {
 	if outboundChannelBuilders.Has(publisher.ReferenceName()) {
-		panic(
-			fmt.Sprintf(
-				"[publisher-channel] channel %s already exists",
-				publisher.ReferenceName(),
-			),
+		return fmt.Errorf(
+			"[publisher-channel] channel %s already exists",
+			publisher.ReferenceName(),
 		)
 	}
 	outboundChannelBuilders.Set(publisher.ReferenceName(), publisher)
+	return nil
 }
 
 // buildOutboundChannels builds all registered outbound channels and adds them
@@ -72,19 +68,18 @@ func AddPublisherChannel(publisher BuildableComponent[endpoint.OutboundChannelAd
 //
 // Parameters:
 //   - container: the dependency container to add built channels to
-func buildOutboundChannels(container container.Container[any, any]) {
+func buildOutboundChannels(container container.Container[any, any]) error {
 	for _, v := range outboundChannelBuilders.GetAll() {
 		outboundChannel, err := v.Build(container)
 		if err != nil {
-			panic(
-				fmt.Sprintf(
-					"[publisher-channel] %s",
-					err,
-				),
+			return fmt.Errorf(
+				"[publisher-channel] %s",
+				err,
 			)
 		}
 		container.Set(v.ReferenceName(), outboundChannel)
 	}
+	return nil
 }
 
 // registerDefaultEndpoints registers the default command and query endpoints
@@ -92,7 +87,7 @@ func buildOutboundChannels(container container.Container[any, any]) {
 //
 // Parameters:
 //   - container: the dependency container to register endpoints with
-func registerDefaultEndpoints(container container.Container[any, any]) {
+func registerDefaultEndpoints(container container.Container[any, any]) error {
 
 	commandDispatcher, _ := endpoint.NewMessageDispatcherBuilder(
 		defaultCommandChannelName,
@@ -106,6 +101,8 @@ func registerDefaultEndpoints(container container.Container[any, any]) {
 		"",
 	).Build(container)
 	activeEndpoints.Set(defaultQueryChannelName, bus.NewQueryBus(queryDispatcher))
+
+	return nil
 }
 
 // AddChannelConnection registers a channel connection with the message system.
@@ -113,16 +110,15 @@ func registerDefaultEndpoints(container container.Container[any, any]) {
 //
 // Parameters:
 //   - con: the channel connection to register
-func AddChannelConnection(con adapter.ChannelConnection) {
+func AddChannelConnection(con adapter.ChannelConnection) error {
 	if channelConnections.Has(con.ReferenceName()) {
-		panic(
-			fmt.Sprintf(
-				"[channel-module] connection %s already exists",
-				con.ReferenceName(),
-			),
+		return fmt.Errorf(
+			"[channel-module] connection %s already exists",
+			con.ReferenceName(),
 		)
 	}
 	channelConnections.Set(con.ReferenceName(), con)
+	return nil
 }
 
 // buildChannelConnections builds all registered channel connections and adds them
@@ -130,19 +126,18 @@ func AddChannelConnection(con adapter.ChannelConnection) {
 //
 // Parameters:
 //   - container: the dependency container to add built connections to
-func buildChannelConnections(container container.Container[any, any]) {
+func buildChannelConnections(container container.Container[any, any]) error {
 	for _, v := range channelConnections.GetAll() {
 		err := v.Connect()
 		if err != nil {
-			panic(
-				fmt.Sprintf(
-					"[channel-module] %s",
-					err,
-				),
+			return fmt.Errorf(
+				"[channel-module] %s",
+				err,
 			)
 		}
 		container.Set(v.ReferenceName(), v)
 	}
+	return nil
 }
 
 // AddConsumerChannel registers a consumer channel builder with the message system.
@@ -150,16 +145,15 @@ func buildChannelConnections(container container.Container[any, any]) {
 //
 // Parameters:
 //   - inboundChannel: the consumer channel builder to register
-func AddConsumerChannel(inboundChannel BuildableComponent[endpoint.InboundChannelAdapter]) {
+func AddConsumerChannel(inboundChannel BuildableComponent[endpoint.InboundChannelAdapter]) error {
 	if inboundChannelBuilders.Has(inboundChannel.ReferenceName()) {
-		panic(
-			fmt.Sprintf(
-				"[consumer-channel] consumer for channel %s already exists",
-				inboundChannel.ReferenceName(),
-			),
+		return fmt.Errorf(
+			"[consumer-channel] consumer for channel %s already exists",
+			inboundChannel.ReferenceName(),
 		)
 	}
 	inboundChannelBuilders.Set(inboundChannel.ReferenceName(), inboundChannel)
+	return nil
 }
 
 // buildInboundChannels builds all registered inbound channels and adds them
@@ -167,14 +161,15 @@ func AddConsumerChannel(inboundChannel BuildableComponent[endpoint.InboundChanne
 //
 // Parameters:
 //   - container: the dependency container to add built channels to
-func buildInboundChannels(container container.Container[any, any]) {
+func buildInboundChannels(container container.Container[any, any]) error {
 	for _, v := range inboundChannelBuilders.GetAll() {
 		inboundChannel, err := v.Build(container)
 		if err != nil {
-			panic(fmt.Sprintf("[consumer-channel] %s", err))
+			return fmt.Errorf("[consumer-channel] %s", err)
 		}
 		container.Set(inboundChannel.ReferenceName(), inboundChannel)
 	}
+	return nil
 }
 
 // AddActionHandler registers an action handler with the message system.
@@ -182,14 +177,12 @@ func buildInboundChannels(container container.Container[any, any]) {
 //
 // Parameters:
 //   - handlerAction: the action handler to register
-func AddActionHandler[T handler.Action, U any](handlerAction handler.ActionHandler[T, U]) {
+func AddActionHandler[T handler.Action, U any](handlerAction handler.ActionHandler[T, U]) error {
 	action := *new(T)
 	if outboundChannelBuilders.Has(action.Name()) {
-		panic(
-			fmt.Sprintf(
-				"handler for %s already exists",
-				action.Name(),
-			),
+		return fmt.Errorf(
+			"handler for %s already exists",
+			action.Name(),
 		)
 	}
 
@@ -200,26 +193,39 @@ func AddActionHandler[T handler.Action, U any](handlerAction handler.ActionHandl
 			handlerAction,
 		),
 	)
+	return nil
 }
 
-func buildActionHandlers(container container.Container[any, any]) {
+func buildActionHandlers(container container.Container[any, any]) error {
 	for _, v := range actionHandlers.GetAll() {
 		actionHandler, err := v.Build(container)
 		if err != nil {
-			return
+			return err
 		}
 		container.Set(actionHandler.Name(), actionHandler)
 	}
+	return nil
 }
 
 // Start initializes the message system by building all registered components
 // and registering default endpoints.
-func Start() {
-	registerDefaultEndpoints(gomesContainer)
-	buildActionHandlers(gomesContainer)
-	buildChannelConnections(gomesContainer)
-	buildOutboundChannels(gomesContainer)
-	buildInboundChannels(gomesContainer)
+func Start() error {
+	buildFunctions := []func(container container.Container[any, any]) error{
+		registerDefaultEndpoints,
+		buildActionHandlers,
+		buildChannelConnections,
+		buildOutboundChannels,
+		buildInboundChannels,
+	}
+
+	for _, buildFunc := range buildFunctions {
+		err := buildFunc(gomesContainer)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // CommandBus returns the default command bus instance.
@@ -227,7 +233,8 @@ func Start() {
 // Returns:
 //   - *bus.CommandBus: the default command bus
 func CommandBus() *bus.CommandBus {
-	return CommandBusByChannel(defaultCommandChannelName)
+	cb, _ := CommandBusByChannel(defaultCommandChannelName)
+	return cb
 }
 
 // QueryBus returns the default query bus instance.
@@ -235,7 +242,8 @@ func CommandBus() *bus.CommandBus {
 // Returns:
 //   - *bus.QueryBus: the default query bus
 func QueryBus() *bus.QueryBus {
-	return QueryBusByChannel(defaultQueryChannelName)
+	qb, _ := QueryBusByChannel(defaultQueryChannelName)
+	return qb
 }
 
 // CommandBusByChannel returns or creates a command bus for the specified channel.
@@ -245,7 +253,7 @@ func QueryBus() *bus.QueryBus {
 //
 // Returns:
 //   - *bus.CommandBus: the command bus for the specified channel
-func CommandBusByChannel(channelName string) *bus.CommandBus {
+func CommandBusByChannel(channelName string) (*bus.CommandBus, error) {
 	dispatcher, err := activeEndpoints.Get(channelName)
 	if err != nil {
 		dispatcher, err := endpoint.NewMessageDispatcherBuilder(
@@ -253,19 +261,19 @@ func CommandBusByChannel(channelName string) *bus.CommandBus {
 			channelName,
 		).Build(gomesContainer)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 
 		commandBus := bus.NewCommandBus(dispatcher)
 		activeEndpoints.Set(channelName, commandBus)
-		return commandBus
+		return commandBus, nil
 	}
 
 	commandDispatcher, ok := dispatcher.(*bus.CommandBus)
 	if !ok {
-		panic(fmt.Sprintf("channel %s is not command channel", channelName))
+		return nil, fmt.Errorf("channel %s is not command channel", channelName)
 	}
-	return commandDispatcher
+	return commandDispatcher, nil
 }
 
 // QueryBusByChannel returns or creates a query bus for the specified channel.
@@ -275,7 +283,7 @@ func CommandBusByChannel(channelName string) *bus.CommandBus {
 //
 // Returns:
 //   - *bus.QueryBus: the query bus for the specified channel
-func QueryBusByChannel(channelName string) *bus.QueryBus {
+func QueryBusByChannel(channelName string) (*bus.QueryBus, error) {
 	dispatcher, err := activeEndpoints.Get(channelName)
 	if err != nil {
 		dispatcher, err := endpoint.NewMessageDispatcherBuilder(
@@ -283,19 +291,19 @@ func QueryBusByChannel(channelName string) *bus.QueryBus {
 			channelName,
 		).Build(gomesContainer)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 
 		queryBus := bus.NewQueryBus(dispatcher)
 		activeEndpoints.Set(channelName, queryBus)
-		return queryBus
+		return queryBus, nil
 	}
 
 	queryDispatcher, ok := dispatcher.(*bus.QueryBus)
 	if !ok {
-		panic(fmt.Sprintf("channel %s is not query channel", channelName))
+		return nil, fmt.Errorf("channel %s is not query channel", channelName)
 	}
-	return queryDispatcher
+	return queryDispatcher, nil
 }
 
 // EventBusByChannel returns or creates an event bus for the specified channel.
@@ -305,7 +313,7 @@ func QueryBusByChannel(channelName string) *bus.QueryBus {
 //
 // Returns:
 //   - *bus.EventBus: the event bus for the specified channel
-func EventBusByChannel(channelName string) *bus.EventBus {
+func EventBusByChannel(channelName string) (*bus.EventBus, error) {
 	dispatcher, err := activeEndpoints.Get(channelName)
 	if err != nil {
 		dispatcher, err := endpoint.NewMessageDispatcherBuilder(
@@ -313,19 +321,19 @@ func EventBusByChannel(channelName string) *bus.EventBus {
 			channelName,
 		).Build(gomesContainer)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 
 		eventBus := bus.NewEventBus(dispatcher)
 		activeEndpoints.Set(channelName, eventBus)
-		return eventBus
+		return eventBus, nil
 	}
 
 	eventDispatcher, ok := dispatcher.(*bus.EventBus)
 	if !ok {
-		panic(fmt.Sprintf("channel %s is not publish event channel", channelName))
+		return nil, fmt.Errorf("channel %s is not publish event channel", channelName)
 	}
-	return eventDispatcher
+	return eventDispatcher, nil
 }
 
 // EventDrivenConsumer creates and returns an event-driven consumer for the
@@ -405,4 +413,8 @@ func ShowActiveEndpoints() {
 		fmt.Printf("%-30s | %-10s\n", name, endpointType)
 	}
 	fmt.Println("-------------------------------------------")
+}
+
+func EnableOtelTrace() {
+	otel.EnableTrace()
 }

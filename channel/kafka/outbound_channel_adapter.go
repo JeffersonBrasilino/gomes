@@ -19,6 +19,7 @@ import (
 	"github.com/jeffersonbrasilino/gomes/message"
 	"github.com/jeffersonbrasilino/gomes/message/channel/adapter"
 	"github.com/jeffersonbrasilino/gomes/message/endpoint"
+	"github.com/jeffersonbrasilino/gomes/otel"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -35,6 +36,7 @@ type outboundChannelAdapter struct {
 	producer          *kafka.Writer
 	topicName         string
 	messageTranslator adapter.OutboundChannelMessageTranslator[*kafka.Message]
+	otelTrace         otel.OtelTrace
 }
 
 // NewPublisherChannelAdapterBuilder creates a new Kafka publisher channel
@@ -75,10 +77,12 @@ func NewOutboundChannelAdapter(
 	topicName string,
 	messageTranslator adapter.OutboundChannelMessageTranslator[*kafka.Message],
 ) *outboundChannelAdapter {
+
 	return &outboundChannelAdapter{
 		producer:          producer,
 		topicName:         topicName,
 		messageTranslator: messageTranslator,
+		otelTrace:         otel.InitTrace("kafka-outbound-channel-adapter"),
 	}
 }
 
@@ -125,14 +129,29 @@ func (a *outboundChannelAdapter) Name() string {
 // Returns:
 //   - error: error if sending fails or context is cancelled
 func (a *outboundChannelAdapter) Send(ctx context.Context, msg *message.Message) error {
+
+	_, span := a.otelTrace.Start(
+		ctx,
+		"",
+		otel.WithMessagingSystemType(otel.MessageSystemTypeKafka),
+		otel.WithSpanOperation(otel.SpanOperationSend),
+		otel.WithSpanKind(otel.SpanKindProducer),
+		otel.WithMessage(msg),
+	)
+	defer span.End()
+
 	select {
 	case <-ctx.Done():
-		return fmt.Errorf("[KAFKA OUTBOUND CHANNEL] Context cancelled after processing before sending result. ")
+		err := fmt.Errorf("[KAFKA OUTBOUND CHANNEL] Context cancelled after processing before sending result. ")
+		span.Error(err, err.Error())
+		return err
 	default:
 	}
 
 	msgToSend, errP := a.messageTranslator.FromMessage(msg)
+
 	if errP != nil {
+		span.Error(errP, errP.Error())
 		return errP
 	}
 
@@ -140,12 +159,21 @@ func (a *outboundChannelAdapter) Send(ctx context.Context, msg *message.Message)
 
 	select {
 	case <-ctx.Done():
-		return fmt.Errorf("[KAFKA OUTBOUND CHANNEL] Context cancelled after processing after sending result. ")
+		err := fmt.Errorf("[KAFKA OUTBOUND CHANNEL] Context cancelled after processing after sending result. ")
+		span.Error(err, err.Error())
+		return err
 	default:
 	}
+
+	if err != nil {
+		span.Error(err, err.Error())
+	} else {
+		span.Success("message sent to kafka topic successfully")
+	}
+
 	return err
 }
 
-func (a *outboundChannelAdapter) Close() error{
+func (a *outboundChannelAdapter) Close() error {
 	return a.producer.Close()
 }

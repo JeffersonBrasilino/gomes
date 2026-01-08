@@ -17,6 +17,7 @@ import (
 
 	"github.com/jeffersonbrasilino/gomes/container"
 	"github.com/jeffersonbrasilino/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/otel"
 )
 
 // messageDispatcherBuilder provides a builder pattern for creating MessageDispatcher
@@ -30,6 +31,7 @@ type messageDispatcherBuilder struct {
 // It provides both synchronous and asynchronous message sending capabilities.
 type MessageDispatcher struct {
 	gateway *Gateway
+	trace   otel.OtelTrace
 }
 
 // NewMessageDispatcherBuilder creates a new message dispatcher builder instance.
@@ -60,6 +62,7 @@ func NewMessageDispatcherBuilder(
 func NewMessageDispatcher(gateway *Gateway) *MessageDispatcher {
 	return &MessageDispatcher{
 		gateway: gateway,
+		trace:   otel.InitTrace("message-dispatcher"),
 	}
 }
 
@@ -86,6 +89,7 @@ func (b *messageDispatcherBuilder) Build(
 	}
 
 	dispatcher := NewMessageDispatcher(gateway)
+
 	return dispatcher, nil
 }
 
@@ -102,6 +106,16 @@ func (m *MessageDispatcher) SendMessage(
 	ctx context.Context,
 	msg *message.Message,
 ) (any, error) {
+
+	ctx, span := m.trace.Start(
+		ctx,
+		"",
+		otel.WithMessagingSystemType(otel.MessageSystemTypeInternal),
+		otel.WithSpanOperation(otel.SpanOperationCreate),
+		otel.WithSpanKind(otel.SpanKindProducer),
+		otel.WithMessage(msg),
+	)
+	defer span.End()
 
 	result, err := m.gateway.Execute(ctx, msg)
 
@@ -124,6 +138,17 @@ func (m *MessageDispatcher) PublishMessage(
 	ctx context.Context,
 	msg *message.Message,
 ) error {
+	var span otel.OtelSpan
+	ctx, span = m.trace.Start(
+		ctx,
+		fmt.Sprintf("Create message %s", msg.GetHeaders().Route),
+		otel.WithMessagingSystemType(otel.MessageSystemTypeInternal),
+		otel.WithSpanOperation(otel.SpanOperationCreate),
+		otel.WithSpanKind(otel.SpanKindProducer),
+		otel.WithMessage(msg),
+	)
+	defer span.End()
+	
 	_, err := m.gateway.Execute(ctx, msg)
 	if err != nil {
 		return err

@@ -12,6 +12,7 @@
   - [Resiliência](#-resiliência)
   - [Kafka](#-kafka)
   - [RabbitMQ](#-rabbitmq)
+- [Observabilidade](#-observabilidade)
 
 ## 🎯 Visão Geral
 
@@ -50,6 +51,11 @@ pkg/core/infrastructure/gomes/
 │   │   ├── inbound_channel_adapter.go  # Consumo de mensagens
 │   │   ├── outbound_channel_adapter.go # Publicação de mensagens
 │   │   └── message_translator.go       # Tradução de mensagens
+│   ├── rabbitmq/           # Driver RabbitMQ
+│   │   ├── connection.go   # Gerenciamento de conexões
+│   │   ├── inbound_channel_adapter.go  # Consumo de mensagens
+│   │   ├── outbound_channel_adapter.go # Publicação de mensagens
+│   │   └── message_translator.go       # Tradução de mensagens
 │   ├── pubsub_channel.go   # Canal publish-subscribe
 │   └── point_to_point.go   # Canal point-to-point
 ├── container/              # Gerenciamento de dependências
@@ -58,16 +64,31 @@ pkg/core/infrastructure/gomes/
 │   ├── message.go          # Estrutura base de mensagens
 │   ├── message_builder.go  # Builder para construção de mensagens
 │   ├── channel/            # Canais de mensagens
+│   │   └── adapter/        # Adaptadores de canal
 │   ├── endpoint/           # Endpoints de processamento
 │   │   ├── event_driven_consumer.go  # Consumer event-driven
 │   │   ├── polling_consumer.go       # Consumer polling
 │   │   ├── gateway.go                # Gateway de processamento
+│   │   ├── message_dispatcher.go     # Dispatcher de mensagens
 │   │   └── interfaces.go             # Interfaces dos endpoints
 │   ├── handler/            # Handlers de mensagens
-│   │   ├── dead_letter.go  # Handler para dead letter
-│   │   └── retry_handler.go # Handler para retry
+│   │   ├── dead_letter.go           # Handler para dead letter
+│   │   ├── retry_handler.go         # Handler para retry
+│   │   ├── context_handler.go       # Handler de contexto
+│   │   ├── acknowledge_handler.go   # Handler de acknowledge
+│   │   └── action_handler_activator.go # Ativador de handlers
 │   └── router/             # Roteamento de mensagens
-└── message_system.go       # Entry point principal
+│       ├── message_filter.go        # Filtro de mensagens
+│       ├── recipient_list_router.go # Router de lista de destinatários
+│       └── router_composite.go      # Router composto
+├── otel/                   # Observabilidade
+│   ├── otel.go             # Interface e tipos do OpenTelemetry
+│   └── trace.go            # Implementação de tracing
+├── examples/               # Exemplos de uso
+│   ├── cqrs/               # Exemplo CQRS
+│   ├── event_driven_consumer/  # Exemplo de consumer
+│   └── message_publisher/      # Exemplo de publisher
+└── gomes.go                # Entry point principal e API pública
 ```
 
 ## 🚀 Bootstrap
@@ -97,19 +118,23 @@ func main() {
 
     slog.Info("Iniciando gomes...")
 
-    // 1. REGISTRAR HANDLERS
+    // 1. HABILITAR OBSERVABILIDADE (Opcional)
+    // Habilite o tracing do OpenTelemetry se configurado
+    gomes.EnableOtelTrace()
+
+    // 2. REGISTRAR HANDLERS
     // Registre todos os handlers de comandos, queries e eventos
     gomes.AddActionHandler(&CreateUserHandler{})
     gomes.AddActionHandler(&GetUserHandler{})
     gomes.AddActionHandler(&UserCreatedEventHandler{})
 
-    // 2. CONFIGURAR CONEXÕES
+    // 3. CONFIGURAR CONEXÕES
     // Configure conexões com sistemas de mensagens (Kafka, RabbitMQ, etc.)
     gomes.AddChannelConnection(
         kafka.NewConnection("defaultConKafka", []string{"localhost:9093"}),
     )
 
-    // 3. CONFIGURAR CANAIS DE PUBLICAÇÃO
+    // 4. CONFIGURAR CANAIS DE PUBLICAÇÃO
     // Configure canais para envio de mensagens
     publisherChannel := kafka.NewPublisherChannelAdapterBuilder(
         "defaultConKafka",
@@ -124,7 +149,7 @@ func main() {
     )
     gomes.AddPublisherChannel(dlqPublisherChannel)
 
-    // 4. CONFIGURAR CANAIS DE CONSUMO
+    // 5. CONFIGURAR CANAIS DE CONSUMO
     // Configure canais para recebimento de mensagens
     consumerChannel := kafka.NewConsumerChannelAdapterBuilder(
         "defaultConKafka",
@@ -137,12 +162,12 @@ func main() {
 
     gomes.AddConsumerChannel(consumerChannel)
 
-    // 5. INICIAR O SISTEMA
+    // 6. INICIAR O SISTEMA
     // Inicie o gomes - este passo é obrigatório
     gomes.Start()
     slog.Info("gomes iniciado com sucesso!")
 
-    // 6. CONFIGURAR CONSUMERS
+    // 7. CONFIGURAR CONSUMERS
     // Configure e inicie os consumers
     consumer, err := gomes.EventDrivenConsumer("test_consumer")
     if err != nil {
@@ -156,14 +181,14 @@ func main() {
         WithStopOnError(false).
         Run(ctx)
 
-    // 7. SISTEMA OPERACIONAL
+    // 8. SISTEMA OPERACIONAL
     // Aqui o sistema está pronto para processar mensagens
     slog.Info("Sistema operacional - processando mensagens...")
 
     // Exemplo de uso dos buses
     go publishMessages(ctx)
 
-    // 8. GRACEFUL SHUTDOWN
+    // 9. GRACEFUL SHUTDOWN
     // Aguarde sinal de interrupção
     <-ctx.Done()
     slog.Info("Iniciando shutdown gracioso...")
@@ -209,26 +234,183 @@ func publishMessages(ctx context.Context) {
 
 ### Métodos de Bootstrap
 
+#### Habilitação de Funcionalidades
+
+- **`EnableOtelTrace()`**: Habilita rastreamento distribuído com OpenTelemetry
+  - Deve ser chamado antes de `Start()` se você deseja observabilidade
+  - Requer configuração prévia do TracerProvider do OpenTelemetry
+  - Opcional, mas recomendado para ambientes de produção
+
 #### Registro de Componentes
 
 - **`AddActionHandler(handler)`**: Registra handlers de comandos, queries e eventos
+
+  - Suporta qualquer tipo que implemente `ActionHandler[T, U]`
+  - Um handler por tipo de ação (Command, Query ou Event)
+  - Retorna erro se handler já existir para a mesma ação
+
 - **`AddChannelConnection(connection)`**: Registra conexões com sistemas de mensagens
+
+  - Suporta Kafka, RabbitMQ e outros drivers
+  - Usa singleton pattern - conexões com mesmo nome retornam a mesma instância
+  - Retorna erro se conexão com mesmo nome já existir
+
 - **`AddPublisherChannel(channel)`**: Registra canais de publicação
+
+  - Usado para enviar mensagens (Commands, Queries, Events)
+  - Pode ter múltiplos publishers para canais diferentes
+  - Retorna erro se canal com mesmo nome já existir
+
 - **`AddConsumerChannel(channel)`**: Registra canais de consumo
+  - Usado para receber e processar mensagens
+  - Suporta configuração de retry e dead letter
+  - Retorna erro se consumer com mesmo nome já existir
 
 #### Controle do Sistema
 
 - **`Start()`**: Inicia o gomes (obrigatório)
+
+  - Constrói todos os componentes registrados
+  - Estabelece conexões com sistemas de mensagens
+  - Registra endpoints padrão para Command e Query Bus
+  - Deve ser chamado após registrar todos os componentes
+
 - **`Shutdown()`**: Encerra o sistema graciosamente
+
+  - Para todos os consumers ativos
+  - Fecha todos os canais (inbound e outbound)
+  - Desconecta de sistemas de mensagens
+  - Sempre use em conjunto com defer ou signal handling
+
 - **`ShowActiveEndpoints()`**: Mostra endpoints ativos para debug
+  - Lista todos os endpoints registrados
+  - Mostra tipo de cada endpoint (Command-Bus, Query-Bus, Event-Bus, Consumer)
+  - Útil para verificar configuração durante desenvolvimento
+
+#### Acesso aos Buses
+
+- **`CommandBus()`**: Retorna o Command Bus padrão
+
+  - Usa canal padrão interno
+  - Ideal para uso local sem necessidade de sistema de mensagens
+
+- **`QueryBus()`**: Retorna o Query Bus padrão
+
+  - Usa canal padrão interno
+  - Ideal para uso local sem necessidade de sistema de mensagens
+
+- **`CommandBusByChannel(channelName)`**: Retorna Command Bus para canal específico
+
+  - Cria bus se não existir
+  - Permite múltiplos buses para diferentes canais
+  - Retorna erro se canal existir mas não for do tipo Command
+
+- **`QueryBusByChannel(channelName)`**: Retorna Query Bus para canal específico
+
+  - Cria bus se não existir
+  - Permite múltiplos buses para diferentes canais
+  - Retorna erro se canal existir mas não for do tipo Query
+
+- **`EventBusByChannel(channelName)`**: Retorna Event Bus para canal específico
+  - Cria bus se não existir
+  - Permite múltiplos buses para diferentes canais
+  - Retorna erro se canal existir mas não for do tipo Event
+
+#### Criação de Consumers
+
+- **`EventDrivenConsumer(consumerName)`**: Cria consumer assíncrono event-driven
+  - Processa mensagens em tempo real
+  - Suporta processamento paralelo com múltiplos processadores
+  - Retorna erro se consumer com mesmo nome já existir
+  - Deve ser iniciado com `.Run(ctx)` após criação
+
+### Fluxo de Inicialização
+
+O gomes segue uma ordem específica de inicialização interna:
+
+1. **Registro de Endpoints Padrão**: Command Bus e Query Bus internos
+2. **Build de Action Handlers**: Constrói todos os handlers registrados
+3. **Build de Conexões**: Estabelece conexões com sistemas de mensagens
+4. **Build de Outbound Channels**: Cria canais de publicação
+5. **Build de Inbound Channels**: Cria canais de consumo
 
 ### Boas Práticas de Bootstrap
 
 1. **Ordem Importante**: Sempre registre handlers antes de iniciar o sistema
-2. **Conexões Únicas**: Use o mesmo nome de conexão para reutilizar instâncias
-3. **Graceful Shutdown**: Sempre configure graceful shutdown para produção
-4. **Error Handling**: Trate erros durante a inicialização
-5. **Logging**: Use logging adequado para monitorar o processo
+2. **Habilite Observabilidade Primeiro**: Chame `EnableOtelTrace()` antes de `Start()`
+3. **Conexões Únicas**: Use o mesmo nome de conexão para reutilizar instâncias
+4. **Graceful Shutdown**: Sempre configure graceful shutdown para produção
+5. **Error Handling**: Trate erros durante a inicialização - todos os métodos `Add*` retornam erro
+6. **Logging**: Use logging adequado para monitorar o processo
+7. **Separação de Canais**: Use canais diferentes para Commands, Queries e Events se necessário
+8. **Nomeação Clara**: Use nomes descritivos para canais e consumers
+
+### Exemplo Completo de Tratamento de Erros
+
+```go
+package main
+
+import (
+    "log"
+    "log/slog"
+
+    "github.com/jeffersonbrasilino/gomes"
+    kafka "github.com/jeffersonbrasilino/gomes/channel/kafka"
+)
+
+func main() {
+    // 1. Habilitar observabilidade
+    gomes.EnableOtelTrace()
+
+    // 2. Registrar handlers com tratamento de erro
+    if err := gomes.AddActionHandler(&CreateUserHandler{}); err != nil {
+        log.Fatalf("Failed to register CreateUserHandler: %v", err)
+    }
+
+    // 3. Registrar conexões com tratamento de erro
+    if err := gomes.AddChannelConnection(
+        kafka.NewConnection("defaultConKafka", []string{"localhost:9093"}),
+    ); err != nil {
+        log.Fatalf("Failed to add channel connection: %v", err)
+    }
+
+    // 4. Registrar canais com tratamento de erro
+    publisherChannel := kafka.NewPublisherChannelAdapterBuilder(
+        "defaultConKafka",
+        "gomes.topic",
+    )
+    if err := gomes.AddPublisherChannel(publisherChannel); err != nil {
+        log.Fatalf("Failed to add publisher channel: %v", err)
+    }
+
+    consumerChannel := kafka.NewConsumerChannelAdapterBuilder(
+        "defaultConKafka",
+        "gomes.topic",
+        "test_consumer",
+    )
+    if err := gomes.AddConsumerChannel(consumerChannel); err != nil {
+        log.Fatalf("Failed to add consumer channel: %v", err)
+    }
+
+    // 5. Iniciar sistema com tratamento de erro
+    if err := gomes.Start(); err != nil {
+        log.Fatalf("Failed to start gomes: %v", err)
+    }
+
+    slog.Info("gomes started successfully")
+
+    // 6. Criar consumer com tratamento de erro
+    consumer, err := gomes.EventDrivenConsumer("test_consumer")
+    if err != nil {
+        log.Fatalf("Failed to create consumer: %v", err)
+    }
+
+    // 7. Mostrar endpoints ativos para debug
+    gomes.ShowActiveEndpoints()
+
+    // ... resto da aplicação ...
+}
+```
 
 ## 🔧 Componentes Principais
 
@@ -1732,6 +1914,713 @@ gomes.ShowActiveEndpoints()
 // gomes.topic            | [inbound] Event-Driven
 // gomes.dlq              | [outbound] Dead-Letter
 ```
+
+## 🔍 Observabilidade
+
+O **gomes** possui suporte integrado para observabilidade através do **OpenTelemetry**, permitindo rastreamento distribuído (distributed tracing) de mensagens em sistemas assíncronos. Isso facilita a identificação de gargalos, análise de performance e debugging de fluxos complexos de mensagens.
+
+### Características Principais
+
+- **Distributed Tracing**: Rastreamento completo de mensagens através de múltiplos serviços
+- **Context Propagation**: Propagação automática de contexto de trace entre mensagens
+- **Span Management**: Criação e gerenciamento de spans para operações
+- **Events e Attributes**: Registro de eventos e atributos customizados nos spans
+- **Status Tracking**: Marcação de sucesso ou erro em operações
+- **Integration with Message Systems**: Suporte nativo para Kafka, RabbitMQ e outros sistemas
+
+### Arquitetura de Observabilidade
+
+```mermaid
+flowchart TD
+    A[Cliente/Produtor] -->|1. Cria Mensagem| B[Command/Query/Event Bus]
+    B -->|2. Inicia Span Producer| C[Outbound Channel Adapter]
+    C -->|3. Injeta Trace Context| D[Message Headers]
+    D -->|4. Publica com TraceID| E[Kafka/RabbitMQ]
+
+    E -->|5. Consome Mensagem| F[Inbound Channel Adapter]
+    F -->|6. Extrai Trace Context| G[Consumer Span]
+    G -->|7. Propaga Context| H[Message Dispatcher]
+    H -->|8. Span de Processamento| I[Handler]
+    I -->|9. Finaliza Span| J[Trace Completo]
+
+    C -.->|Link| G
+
+    K[OpenTelemetry Collector] -->|Coleta| C
+    K -->|Coleta| G
+    K -->|Coleta| H
+    K -->|Coleta| I
+    K -->|Exporta| L[Jaeger/Zipkin/Datadog]
+```
+
+### Diagrama de Execução do Trace
+
+```mermaid
+sequenceDiagram
+    participant P as Producer Service
+    participant OT as OpenTelemetry
+    participant K as Kafka/RabbitMQ
+    participant C as Consumer Service
+    participant H as Handler
+    participant BE as Backend (Jaeger/Zipkin)
+
+    Note over P,BE: Fluxo de Trace Distribuído
+
+    P->>OT: EnableTrace()
+    P->>OT: InitTrace("producer-service")
+    P->>OT: Start(ctx, "send CreateUser")
+    OT->>P: ctx with TraceID, span
+
+    P->>K: Publish Message + TraceID in Headers
+    Note over K: TraceID: abc123<br/>SpanID: xyz789
+
+    K->>C: Consume Message
+    C->>OT: Extract TraceID from Headers
+    C->>OT: Start(ctx, "process CreateUser")
+    OT->>C: ctx with Parent TraceID, new SpanID
+
+    C->>H: Handle(ctx, message)
+    H->>OT: AddEvent("user validation")
+    H->>OT: AddEvent("user created")
+    H->>OT: Success("user created successfully")
+    H->>C: Return success
+
+    C->>OT: End span
+    P->>OT: End span
+
+    OT->>BE: Export Traces
+    BE-->>OT: Acknowledged
+
+    Note over BE: Visualização do Trace Completo<br/>Producer → Kafka → Consumer → Handler
+```
+
+### Habilitando Observabilidade
+
+#### Passo 1: Configurar OpenTelemetry Provider
+
+Primeiro, configure o OpenTelemetry provider com um exporter apropriado (Jaeger, Zipkin, OTLP, etc):
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+
+    "go.opentelemetry.io/otel"
+    "go.opentelemetry.io/otel/exporters/jaeger"
+    "go.opentelemetry.io/otel/propagation"
+    "go.opentelemetry.io/otel/sdk/resource"
+    sdktrace "go.opentelemetry.io/otel/sdk/trace"
+    semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
+)
+
+// InitOtelTraceProvider inicializa o provider do OpenTelemetry
+func InitOtelTraceProvider(serviceName string) (*sdktrace.TracerProvider, error) {
+    // Configure o exporter (Jaeger neste exemplo)
+    exporter, err := jaeger.New(
+        jaeger.WithCollectorEndpoint(
+            jaeger.WithEndpoint("http://localhost:14268/api/traces"),
+        ),
+    )
+    if err != nil {
+        return nil, err
+    }
+
+    // Configure o resource com informações do serviço
+    resource := resource.NewWithAttributes(
+        semconv.SchemaURL,
+        semconv.ServiceNameKey.String(serviceName),
+        semconv.ServiceVersionKey.String("1.0.0"),
+    )
+
+    // Crie o TracerProvider
+    tp := sdktrace.NewTracerProvider(
+        sdktrace.WithBatcher(exporter),
+        sdktrace.WithResource(resource),
+    )
+
+    // Configure o provider global
+    otel.SetTracerProvider(tp)
+
+    // Configure o propagator para injetar/extrair contexto de trace
+    otel.SetTextMapPropagator(
+        propagation.NewCompositeTextMapPropagator(
+            propagation.TraceContext{},
+            propagation.Baggage{},
+        ),
+    )
+
+    return tp, nil
+}
+```
+
+#### Passo 2: Habilitar Tracing no gomes
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+
+    "github.com/jeffersonbrasilino/gomes"
+)
+
+func main() {
+    // 1. Inicialize o OpenTelemetry Provider
+    tp, err := InitOtelTraceProvider("user-service")
+    if err != nil {
+        log.Fatal("Failed to initialize tracer provider:", err)
+    }
+    defer tp.Shutdown(context.Background())
+
+    // 2. Habilite tracing no gomes (OBRIGATÓRIO)
+    gomes.EnableOtelTrace()
+
+    // 3. Configure o gomes normalmente
+    // ... configuração de handlers, canais, etc ...
+
+    gomes.Start()
+
+    // O tracing agora está ativo automaticamente
+}
+```
+
+### Uso Automático vs Manual
+
+#### Uso Automático (Recomendado)
+
+O gomes automaticamente cria e gerencia spans para todas as operações de mensagens quando o tracing está habilitado. Não é necessário nenhum código adicional nos handlers:
+
+```go
+// Handler sem código de trace - tracing é automático
+type CreateUserHandler struct {
+    userRepository UserRepository
+}
+
+func (h *CreateUserHandler) Handle(ctx context.Context, cmd *CreateUserCommand) (*UserCreatedResult, error) {
+    // O contexto já contém o span ativo
+    // Toda operação será rastreada automaticamente
+
+    user := &User{
+        ID:       uuid.New().String(),
+        Username: cmd.Username,
+        Email:    cmd.Email,
+    }
+
+    err := h.userRepository.Save(ctx, user)
+    if err != nil {
+        return nil, err
+    }
+
+    return &UserCreatedResult{
+        UserID:   user.ID,
+        Username: user.Username,
+    }, nil
+}
+```
+
+**Spans Criados Automaticamente:**
+
+- Span do Producer ao publicar mensagem
+- Span do Consumer ao receber mensagem
+- Span do Message Dispatcher ao rotear mensagem
+- Span do Handler ao processar mensagem
+
+#### Uso Manual (Spans Customizados)
+
+Para criar spans adicionais dentro dos handlers ou adicionar eventos/atributos customizados:
+
+```go
+type CreateUserHandler struct {
+    userRepository UserRepository
+    tracer         otel.OtelTrace
+}
+
+func NewCreateUserHandler(repo UserRepository) *CreateUserHandler {
+    return &CreateUserHandler{
+        userRepository: repo,
+        tracer:         otel.InitTrace("user-handler"),
+    }
+}
+
+func (h *CreateUserHandler) Handle(ctx context.Context, cmd *CreateUserCommand) (*UserCreatedResult, error) {
+    // Cria um span customizado para validação
+    ctx, validationSpan := h.tracer.Start(
+        ctx,
+        "validate-user-data",
+        otel.WithSpanKind(otel.SpanKindInternal),
+        otel.WithAttributes(
+            otel.NewOtelAttr("username", cmd.Username),
+            otel.NewOtelAttr("email", cmd.Email),
+        ),
+    )
+    defer validationSpan.End()
+
+    // Adiciona evento de validação iniciada
+    validationSpan.AddEvent("validation-started")
+
+    // Validação
+    if cmd.Username == "" || cmd.Email == "" {
+        validationSpan.Error(
+            fmt.Errorf("validation failed"),
+            "username and email are required",
+        )
+        return nil, errors.New("username and email are required")
+    }
+
+    // Marca validação como sucesso
+    validationSpan.Success("validation completed successfully")
+    validationSpan.End()
+
+    // Cria span para operação de banco de dados
+    ctx, dbSpan := h.tracer.Start(
+        ctx,
+        "save-user-to-database",
+        otel.WithSpanKind(otel.SpanKindClient),
+        otel.WithAttributes(
+            otel.NewOtelAttr("db.operation", "insert"),
+            otel.NewOtelAttr("db.table", "users"),
+        ),
+    )
+    defer dbSpan.End()
+
+    user := &User{
+        ID:       uuid.New().String(),
+        Username: cmd.Username,
+        Email:    cmd.Email,
+    }
+
+    dbSpan.AddEvent("executing-insert")
+
+    err := h.userRepository.Save(ctx, user)
+    if err != nil {
+        dbSpan.Error(err, "failed to save user to database")
+        return nil, fmt.Errorf("failed to save user: %w", err)
+    }
+
+    dbSpan.AddEvent("insert-completed")
+    dbSpan.Success("user saved successfully")
+
+    return &UserCreatedResult{
+        UserID:   user.ID,
+        Username: user.Username,
+    }, nil
+}
+```
+
+### Exemplo Completo com CQRS e Tracing
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "time"
+
+    "github.com/jeffersonbrasilino/gomes"
+    "github.com/jeffersonbrasilino/gomes/otel"
+    kafka "github.com/jeffersonbrasilino/gomes/channel/kafka"
+)
+
+// Command
+type CreateUserCommand struct {
+    Username string `json:"username"`
+    Email    string `json:"email"`
+    Password string `json:"password"`
+}
+
+func (c *CreateUserCommand) Name() string {
+    return "CreateUser"
+}
+
+// Query
+type GetUserQuery struct {
+    UserID string `json:"user_id"`
+}
+
+func (q *GetUserQuery) Name() string {
+    return "GetUser"
+}
+
+// Event
+type UserCreatedEvent struct {
+    UserID    string    `json:"user_id"`
+    Username  string    `json:"username"`
+    Email     string    `json:"email"`
+    Timestamp time.Time `json:"timestamp"`
+}
+
+func (e *UserCreatedEvent) Name() string {
+    return "UserCreated"
+}
+
+// Handlers
+type CreateUserHandler struct {
+    tracer otel.OtelTrace
+}
+
+func (h *CreateUserHandler) Handle(ctx context.Context, cmd *CreateUserCommand) (*UserCreatedResult, error) {
+    // Span customizado para lógica de negócio
+    ctx, businessSpan := h.tracer.Start(
+        ctx,
+        "create-user-business-logic",
+        otel.WithSpanKind(otel.SpanKindInternal),
+    )
+    defer businessSpan.End()
+
+    businessSpan.AddEvent("validating-user-data")
+
+    if cmd.Username == "" || cmd.Email == "" {
+        businessSpan.Error(
+            fmt.Errorf("validation failed"),
+            "username and email are required",
+        )
+        return nil, errors.New("username and email are required")
+    }
+
+    businessSpan.AddEvent("creating-user-entity")
+
+    user := &User{
+        ID:       uuid.New().String(),
+        Username: cmd.Username,
+        Email:    cmd.Email,
+    }
+
+    businessSpan.AddEvent("user-created",
+        otel.NewOtelAttr("user_id", user.ID),
+        otel.NewOtelAttr("username", user.Username),
+    )
+
+    businessSpan.Success("user created successfully")
+
+    return &UserCreatedResult{
+        UserID:   user.ID,
+        Username: user.Username,
+        Email:    user.Email,
+    }, nil
+}
+
+type GetUserHandler struct {
+    tracer otel.OtelTrace
+}
+
+func (h *GetUserHandler) Handle(ctx context.Context, query *GetUserQuery) (*User, error) {
+    ctx, querySpan := h.tracer.Start(
+        ctx,
+        "get-user-query",
+        otel.WithSpanKind(otel.SpanKindInternal),
+        otel.WithAttributes(
+            otel.NewOtelAttr("user_id", query.UserID),
+        ),
+    )
+    defer querySpan.End()
+
+    querySpan.AddEvent("fetching-user-from-database")
+
+    // Simulação de busca no banco
+    user := &User{
+        ID:       query.UserID,
+        Username: "john_doe",
+        Email:    "john@example.com",
+    }
+
+    querySpan.Success("user retrieved successfully")
+
+    return user, nil
+}
+
+type UserCreatedEventHandler struct {
+    tracer otel.OtelTrace
+}
+
+func (h *UserCreatedEventHandler) Handle(ctx context.Context, evt *UserCreatedEvent) error {
+    ctx, eventSpan := h.tracer.Start(
+        ctx,
+        "process-user-created-event",
+        otel.WithSpanKind(otel.SpanKindInternal),
+    )
+    defer eventSpan.End()
+
+    eventSpan.AddEvent("sending-welcome-email",
+        otel.NewOtelAttr("email", evt.Email),
+    )
+
+    // Lógica de envio de email
+    log.Printf("Sending welcome email to %s", evt.Email)
+
+    eventSpan.Success("welcome email sent successfully")
+
+    return nil
+}
+
+func main() {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    // 1. Inicialize o OpenTelemetry Provider
+    tp, err := InitOtelTraceProvider("user-service")
+    if err != nil {
+        log.Fatal("Failed to initialize tracer provider:", err)
+    }
+    defer tp.Shutdown(context.Background())
+
+    // 2. Habilite tracing no gomes
+    gomes.EnableOtelTrace()
+
+    // 3. Configure conexão Kafka
+    gomes.AddChannelConnection(
+        kafka.NewConnection("defaultConKafka", []string{"localhost:9093"}),
+    )
+
+    // 4. Configure canais
+    publisherChannel := kafka.NewPublisherChannelAdapterBuilder(
+        "defaultConKafka",
+        "gomes.topic",
+    )
+    gomes.AddPublisherChannel(publisherChannel)
+
+    consumerChannel := kafka.NewConsumerChannelAdapterBuilder(
+        "defaultConKafka",
+        "gomes.topic",
+        "user_consumer",
+    )
+    gomes.AddConsumerChannel(consumerChannel)
+
+    // 5. Registre handlers com tracing
+    gomes.AddActionHandler(&CreateUserHandler{
+        tracer: otel.InitTrace("create-user-handler"),
+    })
+    gomes.AddActionHandler(&GetUserHandler{
+        tracer: otel.InitTrace("get-user-handler"),
+    })
+    gomes.AddActionHandler(&UserCreatedEventHandler{
+        tracer: otel.InitTrace("user-created-event-handler"),
+    })
+
+    // 6. Inicie o sistema
+    gomes.Start()
+
+    // 7. Configure consumer
+    consumer, _ := gomes.EventDrivenConsumer("user_consumer")
+    go consumer.WithAmountOfProcessors(2).Run(ctx)
+
+    // 8. Publique mensagens - cada uma será rastreada
+    go func() {
+        time.Sleep(2 * time.Second)
+
+        commandBus := gomes.CommandBusByChannel("gomes.topic")
+
+        // Este comando gerará um trace completo:
+        // Producer Span → Kafka → Consumer Span → Dispatcher Span → Handler Span
+        commandBus.SendAsync(ctx, &CreateUserCommand{
+            Username: "john_doe",
+            Email:    "john@example.com",
+            Password: "secure_password",
+        })
+
+        queryBus := gomes.QueryBusByChannel("gomes.topic")
+        queryBus.SendAsync(ctx, &GetUserQuery{
+            UserID: "123",
+        })
+
+        eventBus := gomes.EventBusByChannel("gomes.topic")
+        eventBus.Publish(ctx, &UserCreatedEvent{
+            UserID:    "123",
+            Username:  "john_doe",
+            Email:     "john@example.com",
+            Timestamp: time.Now(),
+        })
+    }()
+
+    // 9. Aguarde
+    <-ctx.Done()
+    gomes.Shutdown()
+}
+```
+
+### Configurações de Span
+
+#### Tipos de Span Kind
+
+```go
+// SpanKindInternal - operações internas (default)
+otel.WithSpanKind(otel.SpanKindInternal)
+
+// SpanKindServer - operação de servidor (recebe requisição)
+otel.WithSpanKind(otel.SpanKindServer)
+
+// SpanKindClient - operação de cliente (faz requisição)
+otel.WithSpanKind(otel.SpanKindClient)
+
+// SpanKindProducer - produção de mensagem
+otel.WithSpanKind(otel.SpanKindProducer)
+
+// SpanKindConsumer - consumo de mensagem
+otel.WithSpanKind(otel.SpanKindConsumer)
+```
+
+#### Tipos de Operação de Mensagem
+
+```go
+// Operação de envio de mensagem
+otel.WithSpanOperation(otel.SpanOperationSend)
+
+// Operação de recebimento de mensagem
+otel.WithSpanOperation(otel.SpanOperationReceive)
+
+// Operação de processamento de mensagem
+otel.WithSpanOperation(otel.SpanOperationProcess)
+
+// Operação de criação de mensagem
+otel.WithSpanOperation(otel.SpanOperationCreate)
+
+// Operação de confirmação de mensagem
+otel.WithSpanOperation(otel.SpanOperationSettle)
+```
+
+#### Tipos de Sistema de Mensagens
+
+```go
+// Sistemas suportados
+otel.WithMessagingSystemType(otel.MessageSystemTypeKafka)
+otel.WithMessagingSystemType(otel.MessageSystemTypeRabbitMQ)
+otel.WithMessagingSystemType(otel.MessageSystemTypeActiveMQ)
+otel.WithMessagingSystemType(otel.MessageSystemTypeSQS)
+otel.WithMessagingSystemType(otel.MessageSystemTypeSNS)
+otel.WithMessagingSystemType(otel.MessageSystemTypeGCPPubSub)
+otel.WithMessagingSystemType(otel.MessageSystemTypePulsar)
+otel.WithMessagingSystemType(otel.MessageSystemTypeRocketMQ)
+```
+
+### Métodos da Interface OtelTrace
+
+- **`Start(ctx, name, options...)`**: Inicia um novo span
+- **`End()`**: Finaliza o span
+- **`AddEvent(message, attributes...)`**: Adiciona evento ao span
+- **`SetStatus(status, description)`**: Define status do span
+- **`Success(message)`**: Marca span como sucesso
+- **`Error(err, message)`**: Marca span como erro
+
+### Atributos Automáticos em Mensagens
+
+Quando você usa `otel.WithMessage(message)`, os seguintes atributos são automaticamente adicionados:
+
+- `messaging.message.id`: ID único da mensagem
+- `messaging.message.correlationId`: ID de correlação
+- `command.name`: Nome do comando/query/evento
+- `messaging.type`: Tipo de mensagem (Command, Query, Event)
+- `command.version`: Versão da mensagem
+- `messaging.destination.name`: Nome do canal de destino
+- `messaging.system`: Sistema de mensagens (kafka, rabbitmq, etc)
+- `messaging.operation.type`: Tipo de operação (send, receive, process)
+
+### Propagação de Contexto
+
+O gomes automaticamente propaga o contexto de trace através dos headers das mensagens:
+
+```go
+// Ao publicar uma mensagem, o TraceID é automaticamente injetado nos headers
+commandBus.SendAsync(ctx, command)
+// Headers incluem: traceparent, tracestate
+
+// Ao consumir, o TraceID é automaticamente extraído e o contexto restaurado
+// O handler recebe um context com o trace parent configurado
+```
+
+### Integração com Backends
+
+#### Jaeger
+
+```go
+import "go.opentelemetry.io/otel/exporters/jaeger"
+
+exporter, err := jaeger.New(
+    jaeger.WithCollectorEndpoint(
+        jaeger.WithEndpoint("http://localhost:14268/api/traces"),
+    ),
+)
+```
+
+#### Zipkin
+
+```go
+import "go.opentelemetry.io/otel/exporters/zipkin"
+
+exporter, err := zipkin.New(
+    "http://localhost:9411/api/v2/spans",
+)
+```
+
+#### OTLP (OpenTelemetry Protocol)
+
+```go
+import "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+
+exporter, err := otlptracegrpc.New(
+    context.Background(),
+    otlptracegrpc.WithEndpoint("localhost:4317"),
+    otlptracegrpc.WithInsecure(),
+)
+```
+
+### Visualização de Traces
+
+Após configurar um backend como Jaeger, você pode visualizar:
+
+- **Trace completo**: Da publicação até o processamento final
+- **Latência**: Tempo gasto em cada etapa
+- **Erros**: Onde e quando ocorreram falhas
+- **Dependências**: Relacionamento entre serviços
+- **Gargalos**: Identificação de componentes lentos
+
+**Exemplo de Trace no Jaeger:**
+
+```
+user-service: send CreateUser (10ms)
+  └─> kafka-outbound-channel-adapter: publish (5ms)
+      └─> kafka: message in transit (100ms)
+          └─> kafka-inbound-channel-adapter: consume (3ms)
+              └─> event-driven-consumer: receive (2ms)
+                  └─> message-dispatcher: route (1ms)
+                      └─> create-user-handler: process (45ms)
+                          ├─> validate-user-data (5ms)
+                          └─> save-user-to-database (40ms)
+```
+
+### Boas Práticas
+
+1. **Sempre habilite trace em produção**: Use sampling para controlar volume
+2. **Adicione atributos relevantes**: Facilita busca e análise
+3. **Use eventos para milestones**: Marque pontos importantes do processamento
+4. **Marque erros explicitamente**: Use `span.Error()` para registrar falhas
+5. **Não crie spans desnecessários**: Evite overhead em operações triviais
+6. **Propague contexto corretamente**: Sempre passe o context atualizado
+7. **Configure timeout adequado**: Para evitar traces incompletos
+8. **Use span links**: Para relacionar traces em processamento assíncrono
+
+### Troubleshooting
+
+#### Traces não aparecem no backend
+
+1. Verifique se `gomes.EnableOtelTrace()` foi chamado
+2. Confirme que o TracerProvider foi inicializado
+3. Verifique a conectividade com o backend (Jaeger/Zipkin)
+4. Confirme que o exporter está configurado corretamente
+
+#### Contexto não é propagado
+
+1. Certifique-se de usar o context retornado por `tracer.Start()`
+2. Verifique se o propagator está configurado no otel global
+3. Confirme que os headers estão sendo injetados/extraídos corretamente
+
+#### Performance degradada
+
+1. Ajuste a taxa de sampling se estiver em 100%
+2. Use batch exporter em vez de export síncrono
+3. Reduza quantidade de atributos e eventos customizados
+4. Considere desabilitar trace em operações de alta frequência
 
 ---
 

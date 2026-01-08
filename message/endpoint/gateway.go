@@ -156,6 +156,13 @@ func (b *gatewayBuilder) WithReplyChannel(channelName string) *gatewayBuilder {
 	return b
 }
 
+// WithAcknowledge sets the acknowledgment handler for message processing.
+//
+// Parameters:
+//   - adapter: the channel message acknowledgment handler to use
+//
+// Returns:
+//   - *gatewayBuilder: builder instance for method chaining
 func (b *gatewayBuilder) WithAcknowledge(
 	adapter handler.ChannelMessageAcknowledgment,
 ) *gatewayBuilder {
@@ -163,6 +170,13 @@ func (b *gatewayBuilder) WithAcknowledge(
 	return b
 }
 
+// WithRetry configures retry intervals for failed message processing attempts.
+//
+// Parameters:
+//   - retryHitTimeMilliseconds: array of retry intervals in milliseconds
+//
+// Returns:
+//   - *gatewayBuilder: builder instance for method chaining
 func (b *gatewayBuilder) WithRetry(
 	retryHitTimeMilliseconds []int,
 ) *gatewayBuilder {

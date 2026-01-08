@@ -51,7 +51,7 @@ func main() {
 	// commandBus.SendRawAsync(context.Background(), "SendAsyncRoute", "SendRawAsync command custom payload", map[string]string{"typeAction": "command"})
 
 	//get Query bus
-	queryBus := gomes.QueryBusByChannel("gomes.topic")
+	queryBus, _ := gomes.QueryBusByChannel("gomes.topic")
 	queryBus.SendAsync(context.Background(), CreateCommand("teste", "123"))
 	queryBus.SendRawAsync(context.Background(), "SendAsyncRoute", "SendRawAsync query custom payload", map[string]string{"typeAction": "query"})
 

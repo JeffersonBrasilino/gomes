@@ -24,6 +24,7 @@ import (
 	"github.com/jeffersonbrasilino/gomes/container"
 	"github.com/jeffersonbrasilino/gomes/message"
 	"github.com/jeffersonbrasilino/gomes/message/handler"
+	"github.com/jeffersonbrasilino/gomes/otel"
 )
 
 // EventDrivenConsumerBuilder is responsible for building EventDrivenConsumer instances.
@@ -47,6 +48,7 @@ type EventDrivenConsumer struct {
 	RunCtx                        context.Context
 	cancelRunCtx                  context.CancelFunc
 	isRunning                     bool
+	otelTrace                     otel.OtelTrace
 }
 
 // NewEventDrivenConsumerBuilder creates a new EventDrivenConsumerBuilder instance.
@@ -84,6 +86,7 @@ func NewEventDrivenConsumer(
 		amountOfProcessors:            1,
 		stopOnError:                   true,
 		isRunning:                     true,
+		otelTrace:                     otel.InitTrace("event-driven-consumer"),
 	}
 	return consumer
 }
@@ -152,6 +155,7 @@ func (b *EventDrivenConsumerBuilder) Build(
 		gateway,
 		inboundChannel,
 	)
+
 	return consumer, nil
 }
 
@@ -282,30 +286,54 @@ func (e *EventDrivenConsumer) sendToGateway(
 	)
 	defer cancel()
 
-	slog.Info("[event-driven-consumer] message processing started.",
-		"consumerName", e.referenceName,
-		"nodeId", nodeId,
-		"messageId", msg.GetHeaders().MessageId,
-	)
+	var span otel.OtelSpan
+	if msg.GetContext() != nil {
 
-	_, err := e.gateway.Execute(opCtx, msg)
-	if err != nil {
-		slog.Error("[event-driven-consumer] processing message error.",
-			"consumerName", e.referenceName,
-			"nodeId", nodeId,
-			"messageId", msg.GetHeaders().MessageId,
-			"error", err.Error(),
+		opCtx, span = e.otelTrace.Start(
+			msg.GetContext(),
+			fmt.Sprintf("Receive message %s", msg.GetHeaders().Route),
+			otel.WithMessagingSystemType(otel.MessageSystemTypeInternal),
+			otel.WithSpanOperation(otel.SpanOperationReceive),
+			otel.WithSpanKind(otel.SpanKindConsumer),
+			otel.WithMessage(msg),
 		)
+		defer span.End()
+	}
+
+	slog.Info("[event-driven-consumer] message processing started.",
+		"consumer.name", e.referenceName,
+		"consumer.nodeId", nodeId,
+		"consumer.messageId", msg.GetHeaders().MessageId,
+	)
+	_, err := e.gateway.Execute(opCtx, msg)
+	spanStatus := otel.SpanStatusOK
+	if err != nil {
+		spanStatus = otel.SpanStatusError
+		slog.Error("[event-driven-consumer] processing message error.",
+			"consumer.name", e.referenceName,
+			"consumer.nodeId", nodeId,
+			"consumer.messageId", msg.GetHeaders().MessageId,
+			"consumer.error", err.Error(),
+		)
+
+		if e.otelTrace != nil {
+			span.Error(err, "[event-driven-consumer] processing message error.")
+		}
+
 		if e.stopOnError {
 			e.cancelRunCtx()
 			return
 		}
 	}
 
+	if e.otelTrace != nil {
+		span.SetStatus(spanStatus, "[event-driven-consumer] message processed completed.")
+	}
+
 	slog.Info("[event-driven-consumer] message processed completed.",
-		"consumerName", e.referenceName,
-		"nodeId", nodeId,
-		"messageId", msg.GetHeaders().MessageId,
+		"consumer.name", e.referenceName,
+		"consumer.nodeId", nodeId,
+		"consumer.messageId", msg.GetHeaders().MessageId,
 	)
 }
 

@@ -139,7 +139,7 @@ func publishMessage() {
 		fmt.Println("publish command message...")
 		//get command bus
 		//the message type is defined by bus(command/query/event)
-		busA := gomes.CommandBusByChannel("gomes.topic")
+		busA, _ := gomes.CommandBusByChannel("gomes.topic")
 		busA.SendAsync(context.Background(), CreateCommand("teste", "123"))
 		time.Sleep(time.Second * 3)
 	}

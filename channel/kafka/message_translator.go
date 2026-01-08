@@ -12,16 +12,19 @@
 package kafka
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 
 	"github.com/jeffersonbrasilino/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/otel"
 	"github.com/segmentio/kafka-go"
 )
 
 // MessageTranslator provides message translation capabilities between internal
 // message formats and Kafka-specific formats.
-type MessageTranslator struct{}
+type MessageTranslator struct {}
 
 // NewMessageTranslator creates a new message translator instance.
 //
@@ -44,6 +47,11 @@ func (m *MessageTranslator) FromMessage(msg *message.Message) (*kafka.Message, e
 	headersMap, err := msg.GetHeaders().ToMap()
 	if err != nil {
 		return nil, fmt.Errorf("[kafka-message-translator] header converter error: %v", err.Error())
+	}
+
+	contextPropagator := otel.GetTraceContextPropagatorByContext(msg.GetContext())
+	if contextPropagator != nil {
+		maps.Copy(headersMap, contextPropagator)
 	}
 
 	kafkaHeaders := []kafka.Header{}
@@ -81,10 +89,16 @@ func (m *MessageTranslator) ToMessage(data *kafka.Message) (*message.Message, er
 	for _, h := range data.Headers {
 		headers[h.Key] = string(h.Value)
 	}
-	
+
 	messageBuilder, err := message.NewMessageBuilderFromHeaders(headers)
 	if err != nil {
-		return nil, fmt.Errorf("[rabbitMQ-message-translator] header converter error: %v", err.Error())
+		return nil, fmt.Errorf("[kafka-message-translator] header converter error: %v", err.Error())
+	}
+	
+	traceParenValue, exists := headers["Traceparent"]
+	if exists && traceParenValue != "" {
+		ctx := otel.GetTraceContextPropagatorByTraceParent(context.Background(), traceParenValue)
+		messageBuilder.WithContext(ctx)
 	}
 
 	messageBuilder.WithPayload(data.Value)
