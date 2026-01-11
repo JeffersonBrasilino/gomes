@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jeffersonbrasilino/gomes/message"
 	"github.com/jeffersonbrasilino/gomes/message/channel"
@@ -25,7 +26,7 @@ func (m *mockPublisherChannel) Name() string {
 	return "mockPublisherChannel"
 }
 
-func (m *mockPublisherChannel) Close() error{
+func (m *mockPublisherChannel) Close() error {
 	return nil
 }
 
@@ -167,12 +168,22 @@ func TestOutboundChannelAdapter_Handle(t *testing.T) {
 		adapterInstance := adapter.NewOutboundChannelAdapter(pubChan)
 		replyChan := channel.NewPointToPointChannel("reply")
 		msg.GetHeaders().ReplyChannel = replyChan
+
+		done := make(chan struct{})
 		replyChan.Subscribe(func(m *message.Message) {
+			defer close(done)
 			if m.GetPayload() != "payload" {
 				t.Errorf("Expected payload 'payload', got '%v'", m.GetPayload())
 			}
 		})
+
 		adapterInstance.Send(context.Background(), msg)
+		select {
+		case <-done:
+			// Sucesso: a mensagem chegou a tempo
+		case <-time.After(2 * time.Second):
+			t.Fatal("Test timed out waiting for reply")
+		}
 		t.Cleanup(func() {
 			replyChan.Close()
 		})
@@ -189,12 +200,22 @@ func TestOutboundChannelAdapter_Handle(t *testing.T) {
 		adapterInstance := adapter.NewOutboundChannelAdapter(pubChan)
 		replyChan := channel.NewPointToPointChannel("reply")
 		msg.GetHeaders().ReplyChannel = replyChan
+
+		done := make(chan struct{})
 		replyChan.Subscribe(func(m *message.Message) {
+			defer close(done)
 			if m.GetPayload() != nil {
 				t.Errorf("Expected payload 'nil', got '%v'", m.GetPayload())
 			}
 		})
 		adapterInstance.Send(context.Background(), msg)
+
+		select {
+		case <-done:
+			// Sucesso: a mensagem chegou a tempo
+		case <-time.After(2 * time.Second):
+			t.Fatal("Test timed out waiting for reply")
+		}
 		t.Cleanup(func() {
 			replyChan.Close()
 		})
