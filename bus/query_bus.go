@@ -17,13 +17,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jeffersonbrasilino/gomes/message"
-	"github.com/jeffersonbrasilino/gomes/message/endpoint"
 	"github.com/jeffersonbrasilino/gomes/message/handler"
 )
 
 // QueryBus provides query execution capabilities for data retrieval operations.
 type QueryBus struct {
-	dispatcher endpoint.Dispatcher
+	dispatcher Dispatcher
 }
 
 // NewQueryBus creates a new query bus instance with the specified dispatcher.
@@ -33,7 +32,7 @@ type QueryBus struct {
 //
 // Returns:
 //   - *QueryBus: new query bus instance
-func NewQueryBus(dispatcher endpoint.Dispatcher) *QueryBus {
+func NewQueryBus(dispatcher Dispatcher) *QueryBus {
 
 	queryBus := &QueryBus{
 		dispatcher: dispatcher,

@@ -16,12 +16,6 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-// producerChannelType defines the type of producer channel for RabbitMQ.
-type producerChannelType int8
-
-// exchangeType defines the type of exchange for RabbitMQ.
-type exchangeType int8
-
 // Producer channel type constants.
 const (
 	// ProducerQueue publishes messages directly to a queue using the default
@@ -47,6 +41,12 @@ const (
 // conInstance holds the singleton connection instance for reuse across the
 // application.
 var conInstance *connection
+
+// producerChannelType defines the type of producer channel for RabbitMQ.
+type producerChannelType int8
+
+// exchangeType defines the type of exchange for RabbitMQ.
+type exchangeType int8
 
 // connection manages RabbitMQ broker connections with lifecycle management
 // capabilities.

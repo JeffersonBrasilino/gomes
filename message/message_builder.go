@@ -139,7 +139,10 @@ func NewMessageBuilderFromHeaders(headers map[string]string) (*MessageBuilder, e
 
 		err := headersMap[k](h)
 		if err != nil {
-			return nil, fmt.Errorf("[kafka-message-translator] header converter error: %v - %v", k, err.Error())
+			return nil, fmt.Errorf(
+				"[kafka-message-translator] header converter error: %v - %v",
+				k, err.Error(),
+			)
 		}
 	}
 

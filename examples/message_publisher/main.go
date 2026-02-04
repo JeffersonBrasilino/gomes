@@ -48,17 +48,20 @@ func main() {
 	// //get command bus
 	// commandBus := gomes.CommandBusByChannel("gomes.topic")
 	// commandBus.SendAsync(context.Background(), CreateCommand("teste", "123"))
-	// commandBus.SendRawAsync(context.Background(), "SendAsyncRoute", "SendRawAsync command custom payload", map[string]string{"typeAction": "command"})
+	// commandBus.SendRawAsync(context.Background(), "SendAsyncRoute",
+	// "SendRawAsync command custom payload", map[string]string{"typeAction": "command"})
 
 	//get Query bus
 	queryBus, _ := gomes.QueryBusByChannel("gomes.topic")
 	queryBus.SendAsync(context.Background(), CreateCommand("teste", "123"))
-	queryBus.SendRawAsync(context.Background(), "SendAsyncRoute", "SendRawAsync query custom payload", map[string]string{"typeAction": "query"})
+	queryBus.SendRawAsync(context.Background(), "SendAsyncRoute",
+		"SendRawAsync query custom payload", map[string]string{"typeAction": "query"})
 
 	// //get event bus
 	// eventBus := gomes.EventBusByChannel("gomes.topic")
 	// eventBus.Publish(context.Background(), CreateCommand("teste", "123"))
-	// eventBus.PublishRaw(context.Background(), "SendAsyncRoute", "SendRawAsync query custom payload", map[string]string{"aaaa": "uheuehuehueh"})
+	// eventBus.PublishRaw(context.Background(), "SendAsyncRoute",
+	// "SendRawAsync query custom payload", map[string]string{"aaaa": "uheuehuehueh"})
 
 	//message system graceful shutdown
 	gomes.Shutdown()

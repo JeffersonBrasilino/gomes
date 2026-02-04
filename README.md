@@ -244,19 +244,16 @@ func publishMessages(ctx context.Context) {
 #### Registro de Componentes
 
 - **`AddActionHandler(handler)`**: Registra handlers de comandos, queries e eventos
-
   - Suporta qualquer tipo que implemente `ActionHandler[T, U]`
   - Um handler por tipo de ação (Command, Query ou Event)
   - Retorna erro se handler já existir para a mesma ação
 
 - **`AddChannelConnection(connection)`**: Registra conexões com sistemas de mensagens
-
   - Suporta Kafka, RabbitMQ e outros drivers
   - Usa singleton pattern - conexões com mesmo nome retornam a mesma instância
   - Retorna erro se conexão com mesmo nome já existir
 
 - **`AddPublisherChannel(channel)`**: Registra canais de publicação
-
   - Usado para enviar mensagens (Commands, Queries, Events)
   - Pode ter múltiplos publishers para canais diferentes
   - Retorna erro se canal com mesmo nome já existir
@@ -269,14 +266,12 @@ func publishMessages(ctx context.Context) {
 #### Controle do Sistema
 
 - **`Start()`**: Inicia o gomes (obrigatório)
-
   - Constrói todos os componentes registrados
   - Estabelece conexões com sistemas de mensagens
   - Registra endpoints padrão para Command e Query Bus
   - Deve ser chamado após registrar todos os componentes
 
 - **`Shutdown()`**: Encerra o sistema graciosamente
-
   - Para todos os consumers ativos
   - Fecha todos os canais (inbound e outbound)
   - Desconecta de sistemas de mensagens
@@ -290,23 +285,19 @@ func publishMessages(ctx context.Context) {
 #### Acesso aos Buses
 
 - **`CommandBus()`**: Retorna o Command Bus padrão
-
   - Usa canal padrão interno
   - Ideal para uso local sem necessidade de sistema de mensagens
 
 - **`QueryBus()`**: Retorna o Query Bus padrão
-
   - Usa canal padrão interno
   - Ideal para uso local sem necessidade de sistema de mensagens
 
 - **`CommandBusByChannel(channelName)`**: Retorna Command Bus para canal específico
-
   - Cria bus se não existir
   - Permite múltiplos buses para diferentes canais
   - Retorna erro se canal existir mas não for do tipo Command
 
 - **`QueryBusByChannel(channelName)`**: Retorna Query Bus para canal específico
-
   - Cria bus se não existir
   - Permite múltiplos buses para diferentes canais
   - Retorna erro se canal existir mas não for do tipo Query
@@ -1240,247 +1231,124 @@ type DeadLetterMessage struct {
 
 ### 🚀 Kafka
 
-O driver Kafka implementa a integração completa com Apache Kafka, fornecendo adaptadores para publicação e consumo de mensagens com suporte a todas as funcionalidades do gomes.
+O driver Kafka implementa a integração com Apache Kafka oferecendo adaptadores e tradutores que conectam o modelo de mensagens do `gomes` ao `kafka-go` de forma segura, observável e resiliente.
 
-#### Configuração da Conexão
+#### Principais conceitos
 
-##### Exemplo de Configuração Básica
+- Conexões: gerenciadas por `kafka.NewConnection(name, brokers)` e registradas via `gomes.AddChannelConnection`.
+- Publishers: criados com `kafka.NewPublisherChannelAdapterBuilder(connectionName, topic)`.
+- Consumers: criados com `kafka.NewConsumerChannelAdapterBuilder(connectionName, topic, groupId)`.
+- Resiliência: suporte a retries e Dead Letter Queue (DLQ) configuráveis nos builders.
 
-```go
-// Crie uma conexão Kafka (singleton pattern)
-connection := kafka.NewConnection("defaultConKafka", []string{"localhost:9093"})
+#### Configuração de Conexão
 
-// Registre a conexão no sistema
-gomes.AddChannelConnection(connection)
-
-// Conecte ao Kafka
-err := connection.Connect()
-if err != nil {
-    log.Fatal("Failed to connect to Kafka:", err)
-}
-```
-
-##### Configurações Avançadas
+Exemplo mínimo:
 
 ```go
-// Configuração com múltiplos brokers
-connection := kafka.NewConnection(
-    "production-kafka",
-    []string{
-        "kafka1.example.com:9092",
-        "kafka2.example.com:9092",
-        "kafka3.example.com:9092",
-    },
-)
+conn := kafka.NewConnection("defaultConKafka", []string{"localhost:9093"})
+gomes.AddChannelConnection(conn)
+// opcional: conn.Connect() é chamado internamente durante o build do gomes
 ```
 
-#### Publisher Channel (Publicação)
+Configurações comuns:
 
-##### Configuração do Publisher
+- Use múltiplos brokers para alta disponibilidade: `NewConnection("prod", []string{"k1:9092","k2:9092"})`.
+- É possível fornecer TLS via `WithTlsConfig` no builder de conexão.
+
+#### Publisher (Publicação)
+
+Criar um publisher e registrar:
 
 ```go
-// Crie um publisher channel
-publisherChannel := kafka.NewPublisherChannelAdapterBuilder(
-    "defaultConKafka",        // Nome da conexão
-    "gomes.topic",     // Tópico de destino
-)
-
-// Registre o canal
-gomes.AddPublisherChannel(publisherChannel)
-
-// Use o canal através dos buses
-commandBus := gomes.CommandBusByChannel("gomes.topic")
-queryBus := gomes.QueryBusByChannel("gomes.topic")
-eventBus := gomes.EventBusByChannel("gomes.topic")
+publisher := kafka.NewPublisherChannelAdapterBuilder("defaultConKafka", "gomes.topic")
+// opções úteis:
+// publisher.WithAsync(true)
+// publisher.WithBatchSize(100).WithBatchBytes(1_000_000)
+gomes.AddPublisherChannel(publisher)
 ```
 
-##### Tradução de Mensagens
+Comportamento:
 
-O sistema automaticamente traduz mensagens internas para o formato Kafka:
+- O publisher usa `kafka.Writer` do `kafka-go` e converte `message.Message` em `kafka.Message` usando `MessageTranslator.FromMessage`.
+- Suporta envio síncrono e assíncrono, batching e controle de acks através de opções do builder.
+
+#### Consumer (Consumo)
+
+Criar um consumer com resiliência:
 
 ```go
-// Mensagem interna
-message := message.NewMessageBuilder().
-    WithMessageType(message.Command).
-    WithPayload(CreateUserCommand{Username: "john", Password: "123"}).
-    WithHeaders(map[string]string{"correlationId": "123"}).
-    Build()
-
-// Tradução automática para Kafka
-kafkaMessage := translator.FromMessage(message)
-// Resultado: kafka.Message com headers e payload JSON
+consumer := kafka.NewConsumerChannelAdapterBuilder("defaultConKafka", "gomes.topic", "test_consumer")
+consumer.WithRetryTimes(2000, 3000) // tentativa + backoff simples
+consumer.WithDeadLetterChannelName("gomes.dlq")
+gomes.AddConsumerChannel(consumer)
 ```
 
-#### Consumer Channel (Consumo)
+Comportamento:
 
-##### Configuração do Consumer
-
-```go
-// Crie um consumer channel
-consumerChannel := kafka.NewConsumerChannelAdapterBuilder(
-    "defaultConKafka",        // Nome da conexão
-    "gomes.topic",    // Tópico de origem
-    "test_consumer",         // Nome do consumer group
-)
-
-// Configure resiliência
-consumerChannel.WithRetryTimes(2_000, 3_000)  // Retry com intervalos
-consumerChannel.WithDeadLetterChannelName("gomes.dlq")  // DLQ
-
-// Registre o canal
-gomes.AddConsumerChannel(consumerChannel)
-```
-
-##### Configurações do Consumer
-
-```go
-// Configurações avançadas do consumer
-consumerConfig := &kafka.ReaderConfig{
-    Brokers:  []string{"localhost:9093"},
-    Topic:    "gomes.topic",
-    GroupID:  "test_consumer",
-    MaxBytes: 10e6,  // 10MB por mensagem
-}
-```
-
-#### Gerenciamento de Conexões
-
-##### Singleton Pattern
-
-O driver Kafka usa singleton pattern para reutilizar conexões:
-
-```go
-// Primeira chamada cria a conexão
-conn1 := kafka.NewConnection("defaultConKafka", []string{"localhost:9093"})
-
-// Segunda chamada retorna a mesma instância
-conn2 := kafka.NewConnection("defaultConKafka", []string{"localhost:9093"})
-
-// conn1 == conn2 (mesma instância)
-```
-
-##### Métodos da Conexão
-
-- **`Connect()`**: Estabelece conexões com brokers Kafka
-- **`Producer()`**: Retorna instância do producer Kafka
-- **`Consumer(topic, groupId)`**: Cria consumer para tópico específico
-- **`Disconnect()`**: Fecha conexões e libera recursos
-- **`ReferenceName()`**: Retorna nome de referência da conexão
+- O consumer cria um `kafka.Reader` por `groupId` e lê mensagens em loop.
+- Cada mensagem é traduzida com `MessageTranslator.ToMessage` e entregue ao `EventDrivenConsumer` do `gomes`.
+- Em caso de falha no processamento, aplica-se a política de retry configurada; se esgotadas as tentativas, a mensagem pode ser enviada para a DLQ configurada.
 
 #### Tradução de Mensagens
 
-##### FromMessage (Interna → Kafka)
+FromMessage (interno → kafka.Message):
+
+- Serializa o payload como JSON no `Value`.
+- Mapeia `message.Message` headers para `kafka.Header`.
+- Usa `MessageId` como `Key` e `ChannelName` como `Topic`.
+
+ToMessage (kafka.Message → interno):
+
+- Converte `kafka.Header` para headers internos (map[string]string).
+- Preserva `Topic`, `Key` (como MessageId) e `Value` (payload JSON — decodificar conforme o tipo esperado).
+- Propaga cabeçalhos de trace (`traceparent`) quando presentes para integração com OpenTelemetry.
+
+Exemplo rápido de uso do tradutor:
 
 ```go
-func (m *MessageTranslator) FromMessage(msg *message.Message) *kafka.Message {
-    // Serializa headers
-    headers := make([]kafka.Header, 0)
-    for key, value := range msg.GetHeaders().ToMap() {
-        headers = append(headers, kafka.Header{
-            Key:   key,
-            Value: []byte(value),
-        })
-    }
-
-    // Serializa payload
-    payload, _ := json.Marshal(msg.GetPayload())
-
-    return &kafka.Message{
-        Topic:   msg.GetHeaders().ChannelName,
-        Key:     []byte(msg.GetHeaders().MessageId),
-        Value:   payload,
-        Headers: headers,
-        Time:    time.Now(),
-    }
-}
+mt := kafka.NewMessageTranslator()
+internal := mt.ToMessage(kafkaMsg)
+kmsg := mt.FromMessage(internal)
 ```
 
-##### ToMessage (Kafka → Interna)
+#### Resiliência e DLQ
 
-```go
-func (m *MessageTranslator) ToMessage(kafkaMsg *kafka.Message) *message.Message {
-    // Converte headers Kafka para headers internos
-    headers := make(map[string]string)
-    for _, header := range kafkaMsg.Headers {
-        headers[header.Key] = string(header.Value)
-    }
+- `WithRetryTimes(initialMs, maxMs)` no consumer config permite retries com backoff simples.
+- `WithDeadLetterChannelName(name)` define o canal onde mensagens com falha persistente serão publicadas.
+- Recomendação: use um tópico DLQ separado por ambiente/serviço para facilitar triagem.
 
-    // Cria mensagem interna
-    return message.NewMessageBuilder().
-        WithPayload(kafkaMsg.Value).
-        WithHeaders(headers).
-        WithChannelName(kafkaMsg.Topic).
-        Build()
-}
-```
+Fluxo típico em erro:
 
-#### Exemplo Completo de Uso
+1. Mensagem lida do Kafka.
+2. `ToMessage` traduz e envia ao handler do `gomes`.
+3. Se o handler falhar, aplica-se retry local (conforme configuração).
+4. Se exceder tentativas, constrói-se uma `DeadLetterMessage` enriquecida e publica-se no tópico DLQ.
 
-```go
-func main() {
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
+#### Boas práticas
 
-    // 1. Configure conexão Kafka
-    gomes.AddChannelConnection(
-        kafka.NewConnection("defaultConKafka", []string{"localhost:9093"}),
-    )
+- Configure `GroupID` por serviço/ambiente para garantir paralelismo seguro.
+- Evite usar `MaxBytes` muito alto; prefira mensagens pequenas e compactas.
+- Habilite tracing (`gomes.EnableOtelTrace()`) para propagar contexto entre produtores/consumidores.
+- Separe tópicos de produção e DLQ; monitore DLQ para identificar problemas.
 
-    // 2. Configure publisher
-    publisherChannel := kafka.NewPublisherChannelAdapterBuilder(
-        "defaultConKafka",
-        "gomes.topic",
-    )
-    gomes.AddPublisherChannel(publisherChannel)
+#### Referência rápida de API
 
-    // 3. Configure DLQ publisher
-    dlqPublisherChannel := kafka.NewPublisherChannelAdapterBuilder(
-        "defaultConKafka",
-        "gomes.dlq",
-    )
-    gomes.AddPublisherChannel(dlqPublisherChannel)
+- `kafka.NewConnection(name string, brokers []string)` → cria/retorna conexão (singleton por nome).
+- `(*Connection).Connect() error` → estabelece conexões (opcional manual).
+- `kafka.NewPublisherChannelAdapterBuilder(connectionName, topic string)` → builder de publisher.
+- `kafka.NewConsumerChannelAdapterBuilder(connectionName, topic, groupId string)` → builder de consumer.
+- `(*publisherBuilder).WithAsync(bool)` → habilita envio assíncrono.
+- `(*publisherBuilder).WithBatchSize(int)` / `WithBatchBytes(int)` → controla batching.
+- `(*consumerBuilder).WithRetryTimes(initialMs, maxMs int)` → configura retry/backoff.
+- `(*consumerBuilder).WithDeadLetterChannelName(name string)` → define DLQ.
+- `MessageTranslator.FromMessage(*message.Message) *kafka.Message` → converte para kafka.Message.
+- `MessageTranslator.ToMessage(*kafka.Message) *message.Message` → converte para message.Message.
 
-    // 4. Configure consumer com resiliência
-    consumerChannel := kafka.NewConsumerChannelAdapterBuilder(
-        "defaultConKafka",
-        "gomes.topic",
-        "test_consumer",
-    )
-    consumerChannel.WithRetryTimes(2_000, 3_000)
-    consumerChannel.WithDeadLetterChannelName("gomes.dlq")
+---
 
-    gomes.AddConsumerChannel(consumerChannel)
+O restante da documentação do `Processamento Assíncrono` segue com a seção RabbitMQ.
 
-    // 5. Registre handlers
-    gomes.AddActionHandler(&CreateUserHandler{})
-
-    // 6. Inicie o sistema
-    gomes.Start()
-
-    // 7. Configure event-driven consumer
-    consumer, err := gomes.EventDrivenConsumer("test_consumer")
-    if err != nil {
-        panic(err)
-    }
-
-    // 8. Execute consumer
-    go consumer.WithAmountOfProcessors(2).
-        WithMessageProcessingTimeout(30000).
-        WithStopOnError(false).
-        Run(ctx)
-
-    // 9. Publique mensagens
-    commandBus := gomes.CommandBusByChannel("gomes.topic")
-    commandBus.SendAsync(ctx, &CreateUserCommand{
-        Username: "john_doe",
-        Password: "secure_password",
-    })
-
-    // 10. Graceful shutdown
-    <-ctx.Done()
-    gomes.Shutdown()
-}
-```
+````
 
 ### 🐰 RabbitMQ
 
@@ -1502,7 +1370,7 @@ err := connection.Connect()
 if err != nil {
     log.Fatal("Failed to connect to RabbitMQ:", err)
 }
-```
+````
 
 ##### Configurações Avançadas
 

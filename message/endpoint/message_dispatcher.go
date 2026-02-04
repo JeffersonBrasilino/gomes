@@ -148,7 +148,7 @@ func (m *MessageDispatcher) PublishMessage(
 		otel.WithMessage(msg),
 	)
 	defer span.End()
-	
+
 	_, err := m.gateway.Execute(ctx, msg)
 	if err != nil {
 		return err

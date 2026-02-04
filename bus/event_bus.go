@@ -17,14 +17,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jeffersonbrasilino/gomes/message"
-	"github.com/jeffersonbrasilino/gomes/message/endpoint"
 	"github.com/jeffersonbrasilino/gomes/message/handler"
 )
 
 // EventBus provides event publishing capabilities for broadcasting events
 // throughout the system.
 type EventBus struct {
-	dispatcher endpoint.Dispatcher
+	dispatcher Dispatcher
 }
 
 // NewEventBus creates a new event bus instance with the specified dispatcher.
@@ -34,7 +33,7 @@ type EventBus struct {
 //
 // Returns:
 //   - *EventBus: new event bus instance
-func NewEventBus(dispatcher endpoint.Dispatcher) *EventBus {
+func NewEventBus(dispatcher Dispatcher) *EventBus {
 
 	eventBus := &EventBus{
 		dispatcher: dispatcher,

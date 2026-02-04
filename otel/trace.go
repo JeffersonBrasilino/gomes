@@ -14,7 +14,8 @@ import (
 	traceTypes "go.opentelemetry.io/otel/trace"
 )
 
-// SpanStatus represents the status of a span, indicating whether the operation was successful or not.
+// SpanStatus represents the status of a span, indicating whether the operation
+// was successful or not.
 type (
 	SpanStatus        int
 	SpanKind          int
@@ -88,7 +89,7 @@ var (
 	}
 )
 
-// enable tracing
+// EnableTrace enables tracing for the message system.
 func EnableTrace() {
 	traceEnabled = true
 }
@@ -131,12 +132,14 @@ func InitTrace(serviceName string) *otelTrace {
 	}
 }
 
+// WithMessagingSystemType sets the messaging system type for the span.
 func WithMessagingSystemType(mt MessageSystemType) StartOptions {
 	return func(so *startOptions) {
 		so.messagingSystemType = mt
 	}
 }
 
+// WithSpanOperation sets the operation type for the span.
 // só deve ser setado para spans de mensageria, http não faz sentido
 func WithSpanOperation(operation SpanOperation) StartOptions {
 	return func(so *startOptions) {
@@ -258,7 +261,7 @@ func (t *otelTrace) Start(
 //
 //	defer span.End()
 func (s *otelSpan) End() {
-	if s.span == nil{
+	if s.span == nil {
 		return
 	}
 	s.span.End()
@@ -274,7 +277,7 @@ func (s *otelSpan) End() {
 //
 //	span.AddEvent("user-validated", otel.NewOtelAttr("valid", "true"))
 func (s *otelSpan) AddEvent(eventMessage string, attributes ...OtelAttribute) {
-	if s.span == nil{
+	if s.span == nil {
 		return
 	}
 	s.span.AddEvent(eventMessage, makeAttributes(attributes))
@@ -290,7 +293,7 @@ func (s *otelSpan) AddEvent(eventMessage string, attributes ...OtelAttribute) {
 //
 //	span.SetStatus(SpanStatusOK, "operation completed successfully")
 func (s *otelSpan) SetStatus(status SpanStatus, description string) {
-	if s.span == nil{
+	if s.span == nil {
 		return
 	}
 	s.span.SetStatus(status.otelStatus(), description)
@@ -318,7 +321,7 @@ func (s *otelSpan) Success(message string) {
 //
 //	span.Error(err, "failed to process user data: invalid format")
 func (s *otelSpan) Error(err error, message string) {
-	if s.span == nil{
+	if s.span == nil {
 		return
 	}
 	s.SetStatus(SpanStatusError, message)

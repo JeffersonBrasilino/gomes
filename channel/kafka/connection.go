@@ -12,21 +12,42 @@
 package kafka
 
 import (
+	"crypto/tls"
+
 	"github.com/segmentio/kafka-go"
 )
 
 // connection manages Kafka producer and consumer connections with lifecycle
 // management capabilities.
 type connection struct {
-	name             string
-	host             []string
-	producerInstance *kafka.Writer
-	consumerConfig   *kafka.ReaderConfig
+	name      string
+	host      []string
+	tlsConfig *tls.Config
+	transport *kafka.Transport
+	dialer    *kafka.Dialer
 }
 
-// conInstance holds the singleton connection instance for reuse across
-// the application.
-var conInstance *connection
+// ConnectionOptions is a functional option for configuring Kafka connections
+// with TLS.
+type ConnectionOptions func(*connectionOptions)
+
+type connectionOptions struct {
+	tlsConfig *tls.Config
+}
+
+// WithTlsConfig sets the TLS configuration for the Kafka connection.
+// This allows secure communication with Kafka brokers.
+//
+// Parameters:
+//   - tlsConfig: TLS configuration to use for the connection
+//
+// Returns:
+//   - ConnectionOptions: configured option function
+func WithTlsConfig(tlsConfig *tls.Config) ConnectionOptions {
+	return func(opt *connectionOptions) {
+		opt.tlsConfig = tlsConfig
+	}
+}
 
 // NewConnection creates a new Kafka connection instance. This implementation
 // uses a singleton pattern to reuse the same connection across the application.
@@ -37,15 +58,17 @@ var conInstance *connection
 //
 // Returns:
 //   - *connection: the connection instance
-func NewConnection(name string, host []string) *connection {
-	if conInstance != nil {
-		return conInstance
+func NewConnection(name string, host []string, opts ...ConnectionOptions) *connection {
+	connectionOptions := &connectionOptions{}
+	for _, opt := range opts {
+		opt(connectionOptions)
 	}
-	conInstance = &connection{
-		name: name,
-		host: host,
+
+	return &connection{
+		name:      name,
+		host:      host,
+		tlsConfig: connectionOptions.tlsConfig,
 	}
-	return conInstance
 }
 
 // Connect establishes connections to Kafka brokers for both producer and consumer.
@@ -54,41 +77,35 @@ func NewConnection(name string, host []string) *connection {
 // Returns:
 //   - error: error if connection establishment fails
 func (c *connection) Connect() error {
-	c.producerInstance = &kafka.Writer{
-		Addr: kafka.TCP(c.host...),
+	c.dialer = &kafka.Dialer{
+		ClientID:  c.name,
+		DualStack: true,
+		TLS:       c.tlsConfig,
 	}
-	c.consumerConfig = &kafka.ReaderConfig{
-		Brokers:  c.host,
-		MaxBytes: 10e6,
+
+	c.transport = &kafka.Transport{
+		ClientID: c.name,
+		Dial:     c.dialer.DialFunc,
+		TLS:      c.tlsConfig,
 	}
 	return nil
 }
 
-// GetProducer returns the Kafka sync producer instance.
-//
-// Returns:
-//   - sarama.SyncProducer: the Kafka producer
-func (c *connection) Producer() *kafka.Writer {
-	return c.producerInstance
+// getTransport returns the Kafka transport configured for this connection.
+// The transport is used by producers to send messages to Kafka.
+func (c *connection) getTransport() *kafka.Transport {
+	return c.transport
 }
 
-// GetConsumer returns the Kafka consumer instance.
-//
-// Returns:
-//   - *kafka.Reader: the Kafka consumer
-func (c *connection) Consumer(topic string, groupId string) *kafka.Reader {
-	consumerConfig := *c.consumerConfig
-	consumerConfig.GroupID = groupId
-	consumerConfig.Topic = topic
-	return kafka.NewReader(consumerConfig)
+// getDialer returns the Kafka dialer configured for this connection.
+// The dialer is used to establish connections to Kafka brokers.
+func (c *connection) getDialer() *kafka.Dialer {
+	return c.dialer
 }
 
-// Disconnect closes the Kafka connections and releases associated resources.
-//
-// Returns:
-//   - error: error if disconnection fails (typically nil)
-func (c *connection) Disconnect() error {
-	return c.producerInstance.Close()
+// getHost returns the list of Kafka broker addresses for this connection.
+func (c *connection) getHost() []string {
+	return c.host
 }
 
 // ReferenceName returns the connection name identifier.

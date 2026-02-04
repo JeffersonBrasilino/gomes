@@ -163,7 +163,19 @@ func GetTraceContextPropagatorByContext(ctx context.Context) map[string]string {
 	return result
 }
 
-func GetTraceContextPropagatorByTraceParent(ctx context.Context, traceParent string) context.Context {
+// GetTraceContextPropagatorByTraceParent extracts trace context from a trace parent header.
+// It creates a new context with the extracted trace information.
+//
+// Parameters:
+//   - ctx: the base context
+//   - traceParent: the W3C trace parent header string
+//
+// Returns:
+//   - context.Context: context with extracted trace information
+func GetTraceContextPropagatorByTraceParent(
+	ctx context.Context,
+	traceParent string,
+) context.Context {
 	carrier := propagation.HeaderCarrier{}
 	carrier.Set("Traceparent", traceParent)
 	propagator := otel.GetTextMapPropagator()

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/jeffersonbrasilino/gomes/message"
-	"github.com/jeffersonbrasilino/gomes/message/channel/adapter"
+	"github.com/jeffersonbrasilino/gomes/message/adapter"
 )
 
 // mockConsumerChannel implements message.ConsumerChannel for tests.

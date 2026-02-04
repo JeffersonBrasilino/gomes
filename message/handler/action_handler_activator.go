@@ -42,7 +42,11 @@ type ActionHandleActivatorBuilder[TInput Action, TOutput any] struct {
 
 // ActionHandleActivator processes actions by delegating to the appropriate
 // handler and managing the response through reply channels.
-type ActionHandleActivator[THandler ActionHandler[TInput, TOutput], TInput Action, TOutput any] struct {
+type ActionHandleActivator[
+	THandler ActionHandler[TInput, TOutput],
+	TInput Action,
+	TOutput any,
+] struct {
 	handler THandler
 }
 

@@ -85,7 +85,7 @@ func NewEventDrivenConsumer(
 		inboundChannelAdapter:         inboundChannelAdapter,
 		amountOfProcessors:            1,
 		stopOnError:                   true,
-		isRunning:                     true,
+		isRunning:                     false,
 		otelTrace:                     otel.InitTrace("event-driven-consumer"),
 	}
 	return consumer
@@ -105,22 +105,20 @@ func (b *EventDrivenConsumerBuilder) Build(
 
 	anyChannel, err := container.Get(b.referenceName)
 	if err != nil {
-		panic(
-			fmt.Sprintf(
+		return nil,
+			fmt.Errorf(
 				"[event-driven-consumer] consumer channel %s not found.",
 				b.referenceName,
-			),
-		)
+			)
 	}
 
 	inboundChannel, ok := anyChannel.(InboundChannelAdapter)
 	if !ok {
-		panic(
-			fmt.Sprintf(
+		return nil,
+			fmt.Errorf(
 				"[event-driven-consumer] consumer channel %s is not a consumer channel.",
 				b.referenceName,
-			),
-		)
+			)
 	}
 
 	gatewayBuilder := NewGatewayBuilder(inboundChannel.ReferenceName(), "")
@@ -180,7 +178,8 @@ func (b *EventDrivenConsumer) WithMessageProcessingTimeout(
 // default value: 1
 //
 // Warning: If the order of message processing is crucial (such as data streaming),
-// it is not recommended to configure this setting, as we do not guarantee the processing order in parallel goroutines.
+// it is not recommended to configure this setting, as we do not guarantee the
+// processing order in parallel goroutines.
 //
 // Parameters:
 //   - value: number of processors
@@ -216,6 +215,7 @@ func (b *EventDrivenConsumer) WithStopOnError(value bool) *EventDrivenConsumer {
 // Returns:
 //   - error: error if any occurs
 func (e *EventDrivenConsumer) Run(ctx context.Context) {
+	e.isRunning = true
 	slog.Info(
 		"[event-driven-consumer] started.",
 		"consumerName", e.referenceName,
@@ -261,7 +261,11 @@ func (e *EventDrivenConsumer) Run(ctx context.Context) {
 			return
 		}
 
-		e.processingQueue <- msg
+		select {
+		case <-e.RunCtx.Done():
+			return
+		case e.processingQueue <- msg:
+		}
 	}
 }
 
@@ -274,12 +278,10 @@ func (e *EventDrivenConsumer) sendToGateway(
 	msg *message.Message,
 	nodeId int,
 ) {
-
 	contextRunHasDone, _ := e.handleContext(e.RunCtx)
 	if contextRunHasDone {
 		return
 	}
-
 	opCtx, cancel := context.WithTimeout(
 		e.RunCtx,
 		time.Duration(e.processingTimeoutMilliseconds)*time.Millisecond,
@@ -288,7 +290,6 @@ func (e *EventDrivenConsumer) sendToGateway(
 
 	var span otel.OtelSpan
 	if msg.GetContext() != nil {
-
 		opCtx, span = e.otelTrace.Start(
 			msg.GetContext(),
 			fmt.Sprintf("Receive message %s", msg.GetHeaders().Route),
@@ -316,7 +317,7 @@ func (e *EventDrivenConsumer) sendToGateway(
 			"consumer.error", err.Error(),
 		)
 
-		if e.otelTrace != nil {
+		if span != nil {
 			span.Error(err, "[event-driven-consumer] processing message error.")
 		}
 
@@ -326,7 +327,7 @@ func (e *EventDrivenConsumer) sendToGateway(
 		}
 	}
 
-	if e.otelTrace != nil {
+	if span != nil {
 		span.SetStatus(spanStatus, "[event-driven-consumer] message processed completed.")
 	}
 
@@ -351,6 +352,9 @@ func (e *EventDrivenConsumer) handleContext(ctx context.Context) (bool, error) {
 
 // Stop requests the consumer to stop by canceling the internal context.
 func (e *EventDrivenConsumer) Stop() {
+	if e.cancelRunCtx == nil {
+		return
+	}
 	e.cancelRunCtx()
 }
 
@@ -376,7 +380,26 @@ func (e *EventDrivenConsumer) startProcessorsNodes() {
 		go func(workerId int) {
 			defer e.processorsWaitGroup.Done()
 			for {
-				msg := <-e.processingQueue
+				ctxIsDone, ctxErr := e.handleContext(e.RunCtx)
+				if ctxIsDone {
+					if ctxErr != nil {
+						slog.Error("[event-driven-consumer] processor stopping",
+							"consumer.name", e.referenceName,
+							"consumer.nodeId", workerId,
+							"error", ctxErr,
+						)
+					}
+					return
+				}
+				msg, ok := <-e.processingQueue
+				if !ok {
+					slog.Debug("[event-driven-consumer] processor stopping",
+						"consumer.name", e.referenceName,
+						"consumer.nodeId", workerId,
+						"reason", "queue closed",
+					)
+					return
+				}
 				if msg != nil {
 					e.sendToGateway(msg, workerId)
 				}

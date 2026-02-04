@@ -24,6 +24,12 @@ func (h *retryHandler) Handle(
 	resultMessage, err := h.handler.Handle(ctx, msg)
 	if err != nil {
 		for k, attempt := range h.attemptsTime {
+			select {
+			case <-ctx.Done():
+				return msg, ctx.Err()
+			default:
+			}
+
 			slog.Info("[retry-handler] retrying process message after error",
 				"messageId", msg.GetHeaders().MessageId,
 				"attempt", k+1,

@@ -7,7 +7,7 @@ import (
 
 	"github.com/jeffersonbrasilino/gomes/container"
 	"github.com/jeffersonbrasilino/gomes/message"
-	"github.com/jeffersonbrasilino/gomes/message/channel/adapter"
+	"github.com/jeffersonbrasilino/gomes/message/adapter"
 	"github.com/jeffersonbrasilino/gomes/message/endpoint"
 	"github.com/jeffersonbrasilino/gomes/otel"
 	amqp "github.com/rabbitmq/amqp091-go"

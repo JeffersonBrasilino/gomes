@@ -7,8 +7,7 @@ import (
 
 	"github.com/jeffersonbrasilino/gomes/container"
 	"github.com/jeffersonbrasilino/gomes/message"
-	"github.com/jeffersonbrasilino/gomes/message/channel/adapter"
-	"github.com/jeffersonbrasilino/gomes/message/endpoint"
+	"github.com/jeffersonbrasilino/gomes/message/adapter"
 	"github.com/jeffersonbrasilino/gomes/otel"
 	"github.com/rabbitmq/amqp091-go"
 )
@@ -107,7 +106,7 @@ func NewInboundChannelAdapter(
 //   - error: error if connection retrieval or consumer creation fails
 func (c *consumerChannelAdapterBuilder) Build(
 	container container.Container[any, any],
-) (endpoint.InboundChannelAdapter, error) {
+) (*adapter.InboundChannelAdapter, error) {
 	con, err := container.Get(c.connectionReferenceName)
 
 	if err != nil {

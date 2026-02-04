@@ -1,0 +1,46 @@
+---
+description: Formatar código Go e gerar documentação GoDoc seguindo boas práticas
+globs:
+alwaysApply: false
+---
+
+# Formatação e Documentação de Código Go
+
+Analise o arquivo fornecido e ajuste a formatação e documentação seguindo as melhores práticas do Go.
+
+## Formatação de Código
+
+Aplique as seguintes regras de formatação:
+
+- **Go Proverbs**: Siga os princípios e provérbios do Go
+- **Ordem de Componentes**: Organize conforme as melhores práticas do Go:
+  1. Package declaration
+  2. Imports
+  3. Constants
+  4. Variables
+  5. Types
+  6. Functions
+- **Limite de Linha**: Cada linha de código deve ter no máximo **100 caracteres**
+
+## Documentação GoDoc
+
+Adicione documentação completa seguindo o padrão GoDoc:
+
+### Documentação de Arquivo
+- No início do arquivo, adicione um comentário de pacote especificando:
+  - **Intenção**: O propósito do arquivo
+  - **Objetivo**: O que a funcionalidade implementada faz
+
+### Documentação de Funções e Métodos
+- Para cada função ou método público, adicione documentação especificando:
+  - **Intenção**: O que o método/função faz
+  - **Parâmetros de Entrada**: Descrição de cada parâmetro (se houver)
+  - **Tipo de Retorno**: Descrição do valor retornado (se houver)
+  - **Comportamento**: Comportamentos especiais ou side effects (se houver)
+
+## Diretrizes
+
+- **Idioma**: Toda documentação deve ser escrita em **inglês**
+- **Padrão GoDoc**: Siga as convenções oficiais do GoDoc
+- **Clareza**: Seja claro e objetivo na documentação
+- **Completude**: Documente todos os elementos públicos (tipos, funções, métodos, constantes)

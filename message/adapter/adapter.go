@@ -7,10 +7,9 @@ import "github.com/jeffersonbrasilino/gomes/message"
 type ChannelConnection interface {
 	ReferenceName() string
 	Connect() error
-	Disconnect() error
 }
 
-type ClosableChannel interface{
+type ClosableChannel interface {
 	Close() error
 }
 

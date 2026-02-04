@@ -312,6 +312,7 @@ func (g *Gateway) executeAsync(
 	if err != nil {
 		internalReplyChannel.Close()
 		responseChannel <- err
+		return
 	}
 
 	select {

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/jeffersonbrasilino/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message/adapter"
 	"github.com/jeffersonbrasilino/gomes/message/channel"
-	"github.com/jeffersonbrasilino/gomes/message/channel/adapter"
 )
 
 // mockPublisherChannel implements message.PublisherChannel for tests.

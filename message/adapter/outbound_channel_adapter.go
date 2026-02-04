@@ -216,7 +216,7 @@ func (b *OutboundChannelAdapterBuilder[TMessageType]) BuildOutboundAdapter(
 func (o *OutboundChannelAdapter) Send(
 	ctx context.Context,
 	msg *message.Message,
-)  error {
+) error {
 	err := o.outboundAdapter.Send(ctx, msg)
 	if msg.GetHeaders().ReplyChannel != nil {
 		go o.publishOnInternalChannel(ctx, msg, err)
@@ -266,7 +266,7 @@ func (o *OutboundChannelAdapter) publishOnInternalChannel(
 // Returns:
 //   - error: Error if closing the channel fails
 func (o *OutboundChannelAdapter) Close() error {
-	
+
 	closableChannel, ok := o.outboundAdapter.(ClosableChannel)
 	if !ok {
 		return nil

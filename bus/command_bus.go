@@ -17,13 +17,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jeffersonbrasilino/gomes/message"
-	"github.com/jeffersonbrasilino/gomes/message/endpoint"
 	"github.com/jeffersonbrasilino/gomes/message/handler"
 )
 
 // CommandBus provides command execution capabilities for action processing.
 type CommandBus struct {
-	dispatcher endpoint.Dispatcher
+	dispatcher Dispatcher
 }
 
 // NewCommandBus creates a new command bus instance with the specified dispatcher.
@@ -33,7 +32,7 @@ type CommandBus struct {
 //
 // Returns:
 //   - *CommandBus: new command bus instance
-func NewCommandBus(dispatcher endpoint.Dispatcher) *CommandBus {
+func NewCommandBus(dispatcher Dispatcher) *CommandBus {
 	commandBus := &CommandBus{
 		dispatcher: dispatcher,
 	}
