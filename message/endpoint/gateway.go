@@ -240,9 +240,7 @@ func (b *gatewayBuilder) Build(
 
 	if b.acknowledgeChannel != nil {
 		messageRouter = router.NewRouter().AddHandler(
-			handler.NewContextHandler(
-				handler.NewAcknowledgeHandler(b.acknowledgeChannel, messageRouter),
-			),
+			handler.NewAcknowledgeHandler(b.acknowledgeChannel, messageRouter),
 		)
 	}
 
@@ -298,6 +296,12 @@ func (g *Gateway) executeAsync(
 ) {
 	defer close(responseChannel)
 
+	select {
+	case <-ctx.Done():
+		responseChannel <- ctx.Err()
+	default:
+	}
+
 	messageToProcess := message.NewMessageBuilderFromMessage(msg)
 	messageToProcess.WithChannelName(g.requestChannelName)
 	messageToProcess.WithContext(ctx)
@@ -313,15 +317,6 @@ func (g *Gateway) executeAsync(
 		internalReplyChannel.Close()
 		responseChannel <- err
 		return
-	}
-
-	select {
-	case <-ctx.Done():
-		responseChannel <- fmt.Errorf(
-			"[gateway]: Context cancelled after processing, before sending result",
-		)
-		return
-	default:
 	}
 
 	responseChannel <- resultMessage

@@ -115,3 +115,7 @@ func (c *connection) getHost() []string {
 func (c *connection) ReferenceName() string {
 	return c.name
 }
+
+func (c *connection) Disconnect() error {
+	return nil
+}

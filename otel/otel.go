@@ -1,9 +1,8 @@
-// Package otel provides utilities for OpenTelemetry integration, facilitating instrumentation,
-// creation and management of spans, events and status for distributed tracing in Go applications.
-
-// Example usage:
-//
-//	exporter, err := otel.InitOtelTraceProvider("myService")
+// Package otel provides helpers to instrument application code using
+// OpenTelemetry. Intent: offer a small, opinionated helper layer to create
+// tracers, spans and events consistently across the codebase. Objective: make
+// it simple to start spans, add events and propagate trace context for
+// messages and HTTP flows.
 package otel
 
 import (
@@ -18,91 +17,59 @@ import (
 
 const GomesOtelTraceEnableFlagName = "gomes.otel.Enable"
 
-// OtelTrace defines interface for creating custom spans.
+// OtelTrace is an interface to start spans and produce OtelSpan instances.
 type OtelTrace interface {
-
-	// Start initiates a new trace.
+	// Start initiates a new span for the given context and name.
 	// Parameters:
-	//   ctx context.Context - propagation context.
-	//   name string - service trace name.
-	//   attributes ...otelAttribute - optional attributes.
+	//   ctx: propagation context used by the span.
+	//   name: span name. If empty, implementation may derive a name.
+	//   options: functional options that modify span creation.
 	// Returns:
-	//   context.Context - updated context.
-	//   OtelSpan - created trace span.
-	Start(
-		ctx context.Context,
-		name string,
-		options ...StartOptions,
-	) (context.Context, OtelSpan)
+	//   context.Context: context that contains the started span.
+	//   OtelSpan: wrapper for the created span.
+	Start(ctx context.Context, name string, options ...StartOptions) (context.Context, OtelSpan)
 }
 
-// OtelSpan defines interface for span manipulation.
+// OtelSpan is a minimal wrapper around an OpenTelemetry span that provides
+// utility methods to end the span, add events and record status.
 type OtelSpan interface {
-	// End finalizes the span.
-	//
-	// Example usage:
-	//   span.End()
+	// End finalizes the span and records its end time.
 	End()
-
-	// AddEvent adds an event to the span, with optional attributes.
-	//
+	// AddEvent records an event on the span.
 	// Parameters:
-	//   eventMessage string - event message.
-	//   attributes ...otelAttribute - optional attributes.
-	//
-	// Example usage:
-	//   span.AddEvent("event", attr1)
+	//   eventMessage: event name or description.
+	//   attributes: optional list of OtelAttribute to attach to the event.
 	AddEvent(eventMessage string, attributes ...OtelAttribute)
-
-	// SetStatus sets the span status (success or error) and a description.
-	//
+	// SetStatus sets the span status and an optional description.
 	// Parameters:
-	//   status SpanStatus - span status.
-	//   description string - status description.
-	//
-	// Example usage:
-	//   span.SetStatus(SpanStatusOK, "ok")
+	//   status: SpanStatus value to set.
+	//   description: human-readable explanation for the status.
 	SetStatus(status SpanStatus, description string)
-
-	// Success marks the span as successful, with descriptive message.
-	//
-	// Parameters:
-	//   message string - success message.
-	//
-	// Example usage:
-	//   span.Success("operation completed")
+	// Success marks the span as successful with the provided message.
 	Success(message string)
-
-	// Error marks the span as error, with descriptive message.
-	//
+	// Error marks the span as errored and records the provided error.
 	// Parameters:
-	//   message string - descriptive error message.
-	//   err error - error to record.
-	//
-	// Example usage:
-	//   span.Error(err, "operation failed")
+	//   err: error instance to record.
+	//   message: descriptive error message.
 	Error(err error, message string)
 }
 
-// otelAttribute representa um par chave-valor para atributos de span/evento.
+// OtelAttribute represents a key/value pair used as a span or event attribute.
 type OtelAttribute struct {
 	key   string
 	value string
 }
 
-// makeAttributes converts a list of otelAttribute into attributes for the span/event.
-//
+// makeAttributes converts a list of OtelAttribute into an OpenTelemetry
+// span/event option that attaches those attributes.
 // Parameters:
 //
-//	attributes []otelAttribute - list of attributes.
+//	attributes: list of OtelAttribute to convert.
 //
 // Returns:
 //
-//	traceTypes.SpanStartEventOption - option with attributes for span/event creation.
-//
-// Example usage:
-//
-//	opts := makeAttributes([]otelAttribute{core.NewOtelAttr("key", "value")})
+//	traceTypes.SpanStartEventOption: an option that can be passed to span start
+//	or event creation functions.
 func makeAttributes(attributes []OtelAttribute) traceTypes.SpanStartEventOption {
 	var attrs []attribute.KeyValue
 	if len(attributes) > 0 {
@@ -113,20 +80,15 @@ func makeAttributes(attributes []OtelAttribute) traceTypes.SpanStartEventOption 
 	return traceTypes.WithAttributes(attrs...)
 }
 
-// NewOtelAttr creates a new otelAttribute with the provided key and value.
-//
+// NewOtelAttr creates an OtelAttribute from a key and value.
 // Parameters:
 //
-//	key string - attribute key.
-//	value string - attribute value.
+//	key: attribute key.
+//	value: attribute value.
 //
 // Returns:
 //
-//	otelAttribute - created attribute.
-//
-// Example usage:
-//
-//	attr := otel.NewOtelAttr("key", "value")
+//	OtelAttribute: constructed attribute instance.
 func NewOtelAttr(key string, value string) OtelAttribute {
 	return OtelAttribute{
 		key:   key,
@@ -134,6 +96,9 @@ func NewOtelAttr(key string, value string) OtelAttribute {
 	}
 }
 
+// makeAttributesFromMessage builds a slice of OtelAttribute extracted from a
+// message.Message headers. It maps common messaging header fields to
+// semantic attribute keys used for tracing.
 func makeAttributesFromMessage(message *message.Message) []OtelAttribute {
 	messageHeaders := message.GetHeaders()
 	destinationName := messageHeaders.Route
@@ -150,6 +115,9 @@ func makeAttributesFromMessage(message *message.Message) []OtelAttribute {
 	}
 }
 
+// GetTraceContextPropagatorByContext extracts the current trace context from
+// ctx using the global text map propagator and returns it as a map of header
+// keys to values. Useful for attaching trace headers to outgoing messages.
 func GetTraceContextPropagatorByContext(ctx context.Context) map[string]string {
 	carrier := propagation.HeaderCarrier{}
 	propagator := otel.GetTextMapPropagator()

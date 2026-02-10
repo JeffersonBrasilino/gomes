@@ -45,10 +45,10 @@ type EventDrivenConsumer struct {
 	processingQueue               chan *message.Message
 	processorsWaitGroup           sync.WaitGroup
 	stopOnError                   bool
-	RunCtx                        context.Context
-	cancelRunCtx                  context.CancelFunc
-	isRunning                     bool
 	otelTrace                     otel.OtelTrace
+	stopTrigger                   chan error
+	runCancelCtxFunc              func()
+	once                          sync.Once
 }
 
 // NewEventDrivenConsumerBuilder creates a new EventDrivenConsumerBuilder instance.
@@ -85,7 +85,6 @@ func NewEventDrivenConsumer(
 		inboundChannelAdapter:         inboundChannelAdapter,
 		amountOfProcessors:            1,
 		stopOnError:                   true,
-		isRunning:                     false,
 		otelTrace:                     otel.InitTrace("event-driven-consumer"),
 	}
 	return consumer
@@ -214,37 +213,28 @@ func (b *EventDrivenConsumer) WithStopOnError(value bool) *EventDrivenConsumer {
 //
 // Returns:
 //   - error: error if any occurs
-func (e *EventDrivenConsumer) Run(ctx context.Context) {
-	e.isRunning = true
+func (e *EventDrivenConsumer) Run(ctx context.Context) error {
 	slog.Info(
 		"[event-driven-consumer] started.",
 		"consumerName", e.referenceName,
 	)
 
-	e.RunCtx, e.cancelRunCtx = context.WithCancel(ctx)
+	runCtx, cancelRunCtx := context.WithCancel(ctx)
 	defer e.shutdown()
-	defer e.cancelRunCtx()
+	e.runCancelCtxFunc = cancelRunCtx
 
 	e.processingQueue = make(chan *message.Message, e.amountOfProcessors)
-	e.startProcessorsNodes()
+	e.stopTrigger = make(chan error)
+	e.startProcessorsNodes(runCtx)
 
 	for {
-		beforeReceiveContextIsDone, consumerCtxErr := e.handleContext(e.RunCtx)
-		if consumerCtxErr != nil {
-			slog.Error("[event-driven-consumer] run error",
-				"consumerName", e.referenceName,
-				"error", consumerCtxErr,
-			)
-			if e.stopOnError {
-				return
-			}
+		select {
+		case <-runCtx.Done():
+			return runCtx.Err()
+		default:
 		}
 
-		if beforeReceiveContextIsDone {
-			return
-		}
-
-		msg, err := e.inboundChannelAdapter.ReceiveMessage(e.RunCtx)
+		msg, err := e.inboundChannelAdapter.ReceiveMessage(runCtx)
 		if err != nil {
 			if err != context.Canceled {
 				slog.Error("[event-driven-consumer] message receive error",
@@ -253,17 +243,14 @@ func (e *EventDrivenConsumer) Run(ctx context.Context) {
 				)
 			}
 			if e.stopOnError {
-				return
+				e.stop(err)
+				return err
 			}
-		}
-		afterReceiveContextIsDone, _ := e.handleContext(e.RunCtx)
-		if afterReceiveContextIsDone {
-			return
 		}
 
 		select {
-		case <-e.RunCtx.Done():
-			return
+		case err := <-e.stopTrigger:
+			return err
 		case e.processingQueue <- msg:
 		}
 	}
@@ -275,15 +262,18 @@ func (e *EventDrivenConsumer) Run(ctx context.Context) {
 //   - msg: message to be processed
 //   - nodeId: processor identifier
 func (e *EventDrivenConsumer) sendToGateway(
+	ctx context.Context,
 	msg *message.Message,
 	nodeId int,
 ) {
-	contextRunHasDone, _ := e.handleContext(e.RunCtx)
-	if contextRunHasDone {
+	select {
+	case <-ctx.Done():
 		return
+	default:
 	}
+
 	opCtx, cancel := context.WithTimeout(
-		e.RunCtx,
+		ctx,
 		time.Duration(e.processingTimeoutMilliseconds)*time.Millisecond,
 	)
 	defer cancel()
@@ -322,7 +312,7 @@ func (e *EventDrivenConsumer) sendToGateway(
 		}
 
 		if e.stopOnError {
-			e.cancelRunCtx()
+			e.stop(err)
 			return
 		}
 	}
@@ -338,72 +328,54 @@ func (e *EventDrivenConsumer) sendToGateway(
 	)
 }
 
-func (e *EventDrivenConsumer) handleContext(ctx context.Context) (bool, error) {
-	select {
-	case <-ctx.Done():
-		if ctx.Err() != nil {
-			return true, ctx.Err()
-		}
-		return true, nil
-	default:
-	}
-	return false, nil
-}
-
 // Stop requests the consumer to stop by canceling the internal context.
 func (e *EventDrivenConsumer) Stop() {
-	if e.cancelRunCtx == nil {
-		return
-	}
-	e.cancelRunCtx()
+	e.stop(nil)
+}
+
+func (e *EventDrivenConsumer) stop(err error) {
+	e.once.Do(func() {
+		if e.runCancelCtxFunc != nil {
+			e.runCancelCtxFunc()
+		}
+		select {
+		case e.stopTrigger <- err:
+		default:
+		}
+	})
 }
 
 // shutdown ends processing, closes the input channel and waits for processors to finish.
 func (e *EventDrivenConsumer) shutdown() {
 
-	if !e.isRunning {
-		return
-	}
-	e.isRunning = false
 	slog.Info("[event-driven-consumer] shutting down.",
 		"consumerName", e.referenceName,
 	)
+
 	e.inboundChannelAdapter.Close()
 	close(e.processingQueue)
+	close(e.stopTrigger)
 	e.processorsWaitGroup.Wait()
 }
 
 // startProcessorsNodes starts concurrent processors to consume messages from the queue.
-func (e *EventDrivenConsumer) startProcessorsNodes() {
+func (e *EventDrivenConsumer) startProcessorsNodes(ctx context.Context) {
 	for i := 0; i < e.amountOfProcessors; i++ {
 		e.processorsWaitGroup.Add(1)
 		go func(workerId int) {
 			defer e.processorsWaitGroup.Done()
-			for {
-				ctxIsDone, ctxErr := e.handleContext(e.RunCtx)
-				if ctxIsDone {
-					if ctxErr != nil {
-						slog.Error("[event-driven-consumer] processor stopping",
-							"consumer.name", e.referenceName,
-							"consumer.nodeId", workerId,
-							"error", ctxErr,
-						)
-					}
-					return
-				}
-				msg, ok := <-e.processingQueue
-				if !ok {
-					slog.Debug("[event-driven-consumer] processor stopping",
-						"consumer.name", e.referenceName,
-						"consumer.nodeId", workerId,
-						"reason", "queue closed",
-					)
-					return
-				}
+			for msg := range e.processingQueue {
+
 				if msg != nil {
-					e.sendToGateway(msg, workerId)
+					e.sendToGateway(ctx, msg, workerId)
 				}
 			}
+
+			slog.Debug("[event-driven-consumer] processor stopping",
+				"consumer.name", e.referenceName,
+				"consumer.nodeId", workerId,
+				"reason", "queue closed",
+			)
 		}(i)
 	}
 }

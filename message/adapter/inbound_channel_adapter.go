@@ -69,36 +69,6 @@ func NewInboundChannelAdapterBuilder[T any](
 	}
 }
 
-// NewInboundChannelAdapter creates a new inbound channel adapter instance.
-//
-// Parameters:
-//   - adapter: The consumer channel implementation for receiving messages
-//   - referenceName: Unique identifier for the adapter instance
-//   - deadLetterChannelName: Name of the dead letter channel for failed messages
-//   - beforeProcessors: List of pre-processing message handlers
-//   - afterProcessors: List of post-processing message handlers
-//   - retryTimeAttempts: time and number of retry attempts
-//
-// Returns:
-//   - *InboundChannelAdapter: Configured inbound channel adapter
-func NewInboundChannelAdapter(
-	adapter message.ConsumerChannel,
-	referenceName string,
-	deadLetterChannelName string,
-	beforeProcessors []message.MessageHandler,
-	afterProcessors []message.MessageHandler,
-	retryTimeAttempts []int,
-) *InboundChannelAdapter {
-	return &InboundChannelAdapter{
-		inboundAdapter:        adapter,
-		referenceName:         referenceName,
-		deadLetterChannelName: deadLetterChannelName,
-		beforeProcessors:      beforeProcessors,
-		afterProcessors:       afterProcessors,
-		retryTimeAttempts:     retryTimeAttempts,
-	}
-}
-
 // WithDeadLetterChannelName sets the dead letter channel name for the adapter builder.
 //
 // Parameters:
@@ -172,6 +142,36 @@ func (b *InboundChannelAdapterBuilder[TMessageType]) BuildInboundAdapter(
 		b.afterProcessors,
 		b.retryTimeAttempts,
 	)
+}
+
+// NewInboundChannelAdapter creates a new inbound channel adapter instance.
+//
+// Parameters:
+//   - adapter: The consumer channel implementation for receiving messages
+//   - referenceName: Unique identifier for the adapter instance
+//   - deadLetterChannelName: Name of the dead letter channel for failed messages
+//   - beforeProcessors: List of pre-processing message handlers
+//   - afterProcessors: List of post-processing message handlers
+//   - retryTimeAttempts: time and number of retry attempts
+//
+// Returns:
+//   - *InboundChannelAdapter: Configured inbound channel adapter
+func NewInboundChannelAdapter(
+	adapter message.ConsumerChannel,
+	referenceName string,
+	deadLetterChannelName string,
+	beforeProcessors []message.MessageHandler,
+	afterProcessors []message.MessageHandler,
+	retryTimeAttempts []int,
+) *InboundChannelAdapter {
+	return &InboundChannelAdapter{
+		inboundAdapter:        adapter,
+		referenceName:         referenceName,
+		deadLetterChannelName: deadLetterChannelName,
+		beforeProcessors:      beforeProcessors,
+		afterProcessors:       afterProcessors,
+		retryTimeAttempts:     retryTimeAttempts,
+	}
 }
 
 // ReferenceName returns the reference name of the adapter.

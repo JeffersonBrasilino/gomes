@@ -18,6 +18,10 @@ type consumerChannelAdapterBuilder struct {
 	*adapter.InboundChannelAdapterBuilder[amqp091.Delivery]
 	connectionReferenceName string
 	consumerName            string
+	exclusive               bool
+	noLocal                 bool
+	noWait                  bool
+	args                    amqp091.Table
 }
 
 // inboundChannelAdapter implements the InboundChannelAdapter interface for
@@ -29,9 +33,12 @@ type inboundChannelAdapter struct {
 	messageTranslator adapter.InboundChannelMessageTranslator[amqp091.Delivery]
 	messageChannel    chan *message.Message
 	errorChannel      chan error
-	ctx               context.Context
-	cancelCtx         context.CancelFunc
 	otelTrace         otel.OtelTrace
+	noLocal           bool
+	exclusive         bool
+	noWait            bool
+	args              amqp091.Table
+	stopTrigger       chan bool
 }
 
 // NewConsumerChannelAdapterBuilder creates a new RabbitMQ consumer channel
@@ -57,41 +64,66 @@ func NewConsumerChannelAdapterBuilder(
 		),
 		connectionReferenceName,
 		consumerName,
+		true,  // durable
+		false, // no-local
+		false, // no-wait
+		nil,   // arguments
 	}
 	return builder
 }
 
-// NewInboundChannelAdapter creates a new RabbitMQ inbound channel adapter
-// instance with OpenTelemetry tracing support. It automatically starts a
-// goroutine to subscribe to the queue and process incoming messages.
+// WithNoLocal sets whether the queue or exchange should be deleted when
+// it is no longer in use (no consumers/bindings).
 //
 // Parameters:
-//   - consumer: the RabbitMQ channel for receiving messages
-//   - queue: the RabbitMQ queue name to consume from
-//   - messageTranslator: translator for converting RabbitMQ messages to
-//     internal format
+//   - data: delete when unused flag (true = auto-delete, false = persistent)
 //
 // Returns:
-//   - *inboundChannelAdapter: configured inbound channel adapter with active
-//     subscription
-func NewInboundChannelAdapter(
-	consumer *amqp091.Channel,
-	queue string,
-	messageTranslator adapter.InboundChannelMessageTranslator[amqp091.Delivery],
-) *inboundChannelAdapter {
-	ctx, cancel := context.WithCancel(context.Background())
-	adp := &inboundChannelAdapter{
-		consumer:          consumer,
-		queue:             queue,
-		messageTranslator: messageTranslator,
-		messageChannel:    make(chan *message.Message),
-		errorChannel:      make(chan error),
-		ctx:               ctx,
-		cancelCtx:         cancel,
-		otelTrace:         otel.InitTrace("rabbitMQ-inbound-channel-adapter"),
-	}
-	go adp.subscribeOnQueue()
-	return adp
+//   - *consumerChannelAdapterBuilder: builder for method chaining
+func (c *consumerChannelAdapterBuilder) WithNoLocal(data bool) *consumerChannelAdapterBuilder {
+	c.noLocal = data
+	return c
+}
+
+// WithExclusive sets the exclusivity flag for the queue or exchange.
+// When true, the resource is exclusive to the connection that declares it.
+//
+// Parameters:
+//   - data: exclusive flag (true = exclusive, false = non-exclusive)
+//
+// Returns:
+//   - *consumerChannelAdapterBuilder: builder for method chaining
+func (c *consumerChannelAdapterBuilder) WithExclusive(data bool) *consumerChannelAdapterBuilder {
+	c.exclusive = data
+	return c
+}
+
+// WithNoWait sets the no-wait flag for the queue or exchange declaration.
+// When true, the method returns immediately without waiting for the server
+// to confirm the operation.
+//
+// Parameters:
+//   - data: no-wait flag (true = no-wait, false = wait for confirmation)
+//
+// Returns:
+//   - *consumerChannelAdapterBuilder: builder for method chaining
+func (c *consumerChannelAdapterBuilder) WithNoWait(data bool) *consumerChannelAdapterBuilder {
+	c.noWait = data
+	return c
+}
+
+// WithArguments sets optional arguments table for the queue or exchange
+// declaration. Arguments can contain vendor-specific extensions and
+// modifications (e.g., message TTL, max length).
+//
+// Parameters:
+//   - args: AMQP table containing optional arguments
+//
+// Returns:
+//   - *consumerChannelAdapterBuilder: builder for method chaining
+func (c *consumerChannelAdapterBuilder) WithArguments(args amqp091.Table) *consumerChannelAdapterBuilder {
+	c.args = args
+	return c
 }
 
 // Build constructs a RabbitMQ inbound channel adapter from the dependency
@@ -116,7 +148,7 @@ func (c *consumerChannelAdapterBuilder) Build(
 		)
 	}
 
-	consumer, err := con.(*connection).Consumer(c.ReferenceName())
+	consumer, err := con.(*connection).GetConnection().Channel()
 	if err != nil {
 		return nil, fmt.Errorf(
 			"[RabbitMQ-inbound-channel] consumer %s could not be created: %s",
@@ -128,8 +160,47 @@ func (c *consumerChannelAdapterBuilder) Build(
 		consumer,
 		c.ReferenceName(),
 		c.MessageTranslator(),
+		c.noLocal,
+		c.exclusive,
+		c.noWait,
+		c.args,
 	)
 	return c.InboundChannelAdapterBuilder.BuildInboundAdapter(adapter), nil
+}
+
+// NewInboundChannelAdapter creates a new RabbitMQ inbound channel adapter
+// instance with OpenTelemetry tracing support. It automatically starts a
+// goroutine to subscribe to the queue and process incoming messages.
+//
+// Parameters:
+//   - consumer: the RabbitMQ channel for receiving messages
+//   - queue: the RabbitMQ queue name to consume from
+//   - messageTranslator: translator for converting RabbitMQ messages to
+//     internal format
+//
+// Returns:
+//   - *inboundChannelAdapter: configured inbound channel adapter with active
+//     subscription
+func NewInboundChannelAdapter(
+	consumer *amqp091.Channel,
+	queue string,
+	messageTranslator adapter.InboundChannelMessageTranslator[amqp091.Delivery],
+	noLocal bool,
+	exclusive bool,
+	noWait bool,
+	args amqp091.Table,
+) *inboundChannelAdapter {
+	adp := &inboundChannelAdapter{
+		consumer:          consumer,
+		queue:             queue,
+		messageTranslator: messageTranslator,
+		messageChannel:    make(chan *message.Message),
+		errorChannel:      make(chan error),
+		otelTrace:         otel.InitTrace("rabbitMQ-inbound-channel-adapter"),
+		stopTrigger:       make(chan bool),
+	}
+	go adp.subscribeOnQueue()
+	return adp
 }
 
 // Name returns the queue name of the RabbitMQ inbound channel adapter.
@@ -157,8 +228,6 @@ func (a *inboundChannelAdapter) Receive(
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-a.ctx.Done():
-		return nil, a.ctx.Err()
 	case msg := <-a.messageChannel:
 		return msg, nil
 	case err := <-a.errorChannel:
@@ -172,10 +241,8 @@ func (a *inboundChannelAdapter) Receive(
 // Returns:
 //   - error: error if closing fails (typically nil)
 func (a *inboundChannelAdapter) Close() error {
-	a.cancelCtx()
+	close(a.stopTrigger)
 	a.consumer.Close()
-	close(a.messageChannel)
-	close(a.errorChannel)
 	return nil
 }
 
@@ -183,39 +250,39 @@ func (a *inboundChannelAdapter) Close() error {
 // messages continuously. This method runs in a separate goroutine and handles
 // message translation and error propagation.
 func (a *inboundChannelAdapter) subscribeOnQueue() {
+	defer func() {
+		close(a.messageChannel)
+		close(a.errorChannel)
+	}()
+
 	rabbitmqMessages, err := a.consumer.Consume(
 		a.queue,
 		"",    // consumer tag (server generates if empty)
 		false, // auto-ack (we handle ack manually)
-		false, // exclusive
-		false, // no-local
-		false, // no-wait
-		nil,   // args
+		a.exclusive,
+		a.noLocal,
+		a.noWait,
+		a.args,
 	)
 
-	for {
-		select {
-		case <-a.ctx.Done():
-			return
-		default:
-		}
+	if err != nil {
+        a.errorChannel <- fmt.Errorf("failed to start consuming: %w", err)
+        return
+    }
 
-		msg := <-rabbitmqMessages
-
-		if err != nil {
-			if err == context.Canceled {
-				return
-			}
-			a.errorChannel <- err
-		}
-
+	for msg := range rabbitmqMessages {
 		message, translateErr := a.messageTranslator.ToMessage(msg)
 		if translateErr != nil {
-			a.errorChannel <- translateErr
+			select {
+			case a.errorChannel <- translateErr:
+			case <-a.stopTrigger:
+				return
+			}
+			continue
 		}
 
 		select {
-		case <-a.ctx.Done():
+		case <-a.stopTrigger:
 			return
 		case a.messageChannel <- message:
 		}

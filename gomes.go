@@ -564,6 +564,9 @@ func Shutdown() {
 		case endpoint.OutboundChannelAdapter:
 			slog.Info("[message-system] close outbound channel", "name", k)
 			c.Close()
+		case adapter.ChannelConnection:
+			slog.Info("[message-system] disconnect channel connection", "name", k)
+			c.Disconnect()
 		}
 	}
 	slog.Info("[message-system] shutdown completed")

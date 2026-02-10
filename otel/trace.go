@@ -1,6 +1,7 @@
-// Package otel provides implementation for OpenTelemetry tracing functionality,
-// offering a simplified interface for creating and managing traces in distributed systems.
-
+// Package otel provides an implementation for OpenTelemetry tracing
+// functionality. Intent: present a lightweight API to create and manage
+// traces and spans across message and HTTP flows. Objective: simplify span
+// creation, status reporting and propagation for the application.
 package otel
 
 import (
@@ -132,39 +133,51 @@ func InitTrace(serviceName string) *otelTrace {
 	}
 }
 
-// WithMessagingSystemType sets the messaging system type for the span.
+// WithMessagingSystemType returns a StartOptions that sets the messaging
+// system type on the span start options.
 func WithMessagingSystemType(mt MessageSystemType) StartOptions {
 	return func(so *startOptions) {
 		so.messagingSystemType = mt
 	}
 }
 
-// WithSpanOperation sets the operation type for the span.
-// só deve ser setado para spans de mensageria, http não faz sentido
+// WithSpanOperation returns a StartOptions that sets the span operation
+// type. This option is intended for messaging spans and typically does not
+// apply to HTTP spans.
 func WithSpanOperation(operation SpanOperation) StartOptions {
 	return func(so *startOptions) {
 		so.operation = operation
 	}
 }
 
+// WithSpanKind returns a StartOptions that sets the span kind (server,
+// client, producer, consumer, internal).
 func WithSpanKind(kind SpanKind) StartOptions {
 	return func(so *startOptions) {
 		so.spanKind = kind
 	}
 }
 
+// WithTraceContextToLink returns a StartOptions that links an existing trace
+// context to the newly created span, creating an explicit link between
+// spans.
 func WithTraceContextToLink(ctx context.Context) StartOptions {
 	return func(so *startOptions) {
 		so.traceContextToLink = ctx
 	}
 }
 
+// WithAttributes returns a StartOptions that appends OtelAttribute values to
+// the span start options.
 func WithAttributes(attributes ...OtelAttribute) StartOptions {
 	return func(so *startOptions) {
 		so.attributes = attributes
 	}
 }
 
+// WithMessage returns a StartOptions that sets the message associated with
+// the span. When provided, the message headers are used to populate common
+// messaging attributes.
 func WithMessage(message *message.Message) StartOptions {
 	return func(so *startOptions) {
 		so.message = message
