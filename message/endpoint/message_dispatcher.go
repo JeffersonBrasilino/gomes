@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jeffersonbrasilino/gomes/container"
 	"github.com/jeffersonbrasilino/gomes/message"
 	"github.com/jeffersonbrasilino/gomes/otel"
@@ -141,7 +142,7 @@ func (m *MessageDispatcher) PublishMessage(
 	var span otel.OtelSpan
 	ctx, span = m.trace.Start(
 		ctx,
-		fmt.Sprintf("Create message %s", msg.GetHeaders().Route),
+		fmt.Sprintf("Create message %s", msg.GetHeader().Get(message.HeaderRoute)),
 		otel.WithMessagingSystemType(otel.MessageSystemTypeInternal),
 		otel.WithSpanOperation(otel.SpanOperationCreate),
 		otel.WithSpanKind(otel.SpanKindProducer),
@@ -155,4 +156,24 @@ func (m *MessageDispatcher) PublishMessage(
 	}
 
 	return nil
+}
+
+// buildMessage creates a message builder configured for command messages with
+// automatic correlation ID generation.
+//
+// Returns:
+//   - *message.MessageBuilder: configured message builder for commands
+func (c *MessageDispatcher) MessageBuilder(
+	messageType message.MessageType,
+	payload any,
+	headers map[string]string,
+) *message.MessageBuilder {
+	builder, _ := message.NewMessageBuilderFromHeaders(headers)
+	builder.WithMessageType(messageType)
+	builder.WithPayload(payload)
+	if val, ok := headers[message.HeaderCorrelationId]; !ok || val == "" {
+		builder.WithCorrelationId(uuid.New().String())
+	}
+
+	return builder
 }

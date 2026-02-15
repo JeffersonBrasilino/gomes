@@ -47,8 +47,9 @@ type EventDrivenConsumer struct {
 	stopOnError                   bool
 	otelTrace                     otel.OtelTrace
 	stopTrigger                   chan error
-	runCancelCtxFunc              func()
+	runCancelCtxFunc              func(err error)
 	once                          sync.Once
+	mu                            sync.Mutex
 }
 
 // NewEventDrivenConsumerBuilder creates a new EventDrivenConsumerBuilder instance.
@@ -142,6 +143,10 @@ func (b *EventDrivenConsumerBuilder) Build(
 		gatewayBuilder.WithAcknowledge(ackChannel)
 	}
 
+	if inboundChannel.SendReplyUsingReplyTo() == true {
+		gatewayBuilder.WithSendReplyUsingReplyTo()
+	}
+
 	gateway, err := gatewayBuilder.Build(container)
 	if err != nil {
 		return nil, err
@@ -219,7 +224,7 @@ func (e *EventDrivenConsumer) Run(ctx context.Context) error {
 		"consumerName", e.referenceName,
 	)
 
-	runCtx, cancelRunCtx := context.WithCancel(ctx)
+	runCtx, cancelRunCtx := context.WithCancelCause(ctx)
 	defer e.shutdown()
 	e.runCancelCtxFunc = cancelRunCtx
 
@@ -230,7 +235,7 @@ func (e *EventDrivenConsumer) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-runCtx.Done():
-			return runCtx.Err()
+			return context.Cause(runCtx)
 		default:
 		}
 
@@ -238,7 +243,7 @@ func (e *EventDrivenConsumer) Run(ctx context.Context) error {
 		if err != nil {
 			if err != context.Canceled {
 				slog.Error("[event-driven-consumer] message receive error",
-					"consumerName", e.referenceName,
+					"consumer.name", e.referenceName,
 					"error", err,
 				)
 			}
@@ -278,11 +283,13 @@ func (e *EventDrivenConsumer) sendToGateway(
 	)
 	defer cancel()
 
+	header := msg.GetHeader()
+
 	var span otel.OtelSpan
 	if msg.GetContext() != nil {
 		opCtx, span = e.otelTrace.Start(
 			msg.GetContext(),
-			fmt.Sprintf("Receive message %s", msg.GetHeaders().Route),
+			fmt.Sprintf("Receive message %s", header.Get(message.HeaderRoute)),
 			otel.WithMessagingSystemType(otel.MessageSystemTypeInternal),
 			otel.WithSpanOperation(otel.SpanOperationReceive),
 			otel.WithSpanKind(otel.SpanKindConsumer),
@@ -294,7 +301,7 @@ func (e *EventDrivenConsumer) sendToGateway(
 	slog.Info("[event-driven-consumer] message processing started.",
 		"consumer.name", e.referenceName,
 		"consumer.nodeId", nodeId,
-		"consumer.messageId", msg.GetHeaders().MessageId,
+		"consumer.messageId", header.Get(message.HeaderMessageId),
 	)
 	_, err := e.gateway.Execute(opCtx, msg)
 	spanStatus := otel.SpanStatusOK
@@ -303,7 +310,7 @@ func (e *EventDrivenConsumer) sendToGateway(
 		slog.Error("[event-driven-consumer] processing message error.",
 			"consumer.name", e.referenceName,
 			"consumer.nodeId", nodeId,
-			"consumer.messageId", msg.GetHeaders().MessageId,
+			"consumer.messageId", header.Get(message.HeaderMessageId),
 			"consumer.error", err.Error(),
 		)
 
@@ -324,7 +331,7 @@ func (e *EventDrivenConsumer) sendToGateway(
 	slog.Info("[event-driven-consumer] message processed completed.",
 		"consumer.name", e.referenceName,
 		"consumer.nodeId", nodeId,
-		"consumer.messageId", msg.GetHeaders().MessageId,
+		"consumer.messageId", header.Get(message.HeaderMessageId),
 	)
 }
 
@@ -336,7 +343,7 @@ func (e *EventDrivenConsumer) Stop() {
 func (e *EventDrivenConsumer) stop(err error) {
 	e.once.Do(func() {
 		if e.runCancelCtxFunc != nil {
-			e.runCancelCtxFunc()
+			e.runCancelCtxFunc(err)
 		}
 		select {
 		case e.stopTrigger <- err:
@@ -354,8 +361,10 @@ func (e *EventDrivenConsumer) shutdown() {
 
 	e.inboundChannelAdapter.Close()
 	close(e.processingQueue)
-	close(e.stopTrigger)
 	e.processorsWaitGroup.Wait()
+	e.once.Do(func() {
+		close(e.stopTrigger)
+	})
 }
 
 // startProcessorsNodes starts concurrent processors to consume messages from the queue.

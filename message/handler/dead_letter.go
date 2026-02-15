@@ -74,7 +74,7 @@ func (s *deadLetter) Handle(
 	originalPayload, errP := s.convertMessagePayload(msg)
 	if errP != nil {
 		slog.Info("[dead-letter-handler] cannot convert original payload",
-			"messageId", msg.GetHeaders().MessageId,
+			"messageId", msg.GetHeader().Get(message.HeaderMessageId),
 			"reason", errP.Error(),
 			"dlqChannelName", s.channel.Name(),
 		)
@@ -91,7 +91,7 @@ func (s *deadLetter) Handle(
 	errDql := s.channel.Send(ctxDql, dlqMessage)
 	if errDql != nil {
 		slog.Error("[dead-letter-handler] failed to send message to dead letter",
-			"messageId", msg.GetHeaders().MessageId,
+			"messageId", msg.GetHeader().Get(message.HeaderMessageId),
 			"reason", errDql.Error(),
 			"dlqChannelName", s.channel.Name(),
 		)
@@ -99,7 +99,7 @@ func (s *deadLetter) Handle(
 	}
 
 	slog.Info("[dead-letter-handler] Sent message to dead letter",
-		"messageId", msg.GetHeaders().MessageId,
+		"messageId", msg.GetHeader().Get(message.HeaderMessageId),
 		"reason", err.Error(),
 		"dlqChannelName", s.channel.Name(),
 	)
@@ -123,13 +123,13 @@ func (s *deadLetter) makeDeadLetterMessage(
 	msg *message.Message,
 	payload *deadLetterMessage,
 ) *message.Message {
-	headers, _ := msg.GetHeaders().ToMap()
+	headers := msg.GetHeader()
 	payload.Headers = headers
 	dlqMessage := message.NewMessageBuilder()
 	dlqMessage.WithContext(ctxDql)
 	dlqMessage.WithChannelName(s.channel.Name())
 	dlqMessage.WithMessageType(message.Document)
-	dlqMessage.WithCorrelationId(msg.GetHeaders().CorrelationId)
+	dlqMessage.WithCorrelationId(msg.GetHeader().Get(message.HeaderCorrelationId))
 	dlqMessage.WithPayload(payload)
 
 	return dlqMessage.Build()

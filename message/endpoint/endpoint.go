@@ -16,6 +16,7 @@ type InboundChannelAdapter interface {
 	ReceiveMessage(ctx context.Context) (*message.Message, error)
 	RetryAttempts() []int
 	Close() error
+	SendReplyUsingReplyTo() bool
 }
 
 type OutboundChannelAdapter interface {

@@ -32,6 +32,7 @@ type InboundChannelAdapterBuilder[TMessageType any] struct {
 	beforeProcessors      []message.MessageHandler
 	afterProcessors       []message.MessageHandler
 	retryTimeAttempts     []int
+	sendReplyUsingReplyTo bool
 }
 
 // InboundChannelAdapter handles the reception, processing, and forwarding of messages
@@ -43,6 +44,7 @@ type InboundChannelAdapter struct {
 	beforeProcessors      []message.MessageHandler
 	afterProcessors       []message.MessageHandler
 	retryTimeAttempts     []int
+	sendReplyUsingReplyTo bool
 }
 
 // NewInboundChannelAdapterBuilder creates a new builder instance for configuring
@@ -99,6 +101,12 @@ func (b *InboundChannelAdapterBuilder[TMessageType]) WithAfterInterceptors(
 	b.afterProcessors = processors
 }
 
+// WithSendReplyUsingReplyTo enables reply-to functionality for the adapter builder.
+func (b *InboundChannelAdapterBuilder[TMessageType]) WithSendReplyUsingReplyTo() {
+	b.sendReplyUsingReplyTo = true
+
+}
+
 // ReferenceName returns the current reference(ChannelName) name of the builder.
 //
 // Returns:
@@ -117,6 +125,10 @@ func (b *InboundChannelAdapterBuilder[TMessageType]) WithRetryTimes(
 	b.retryTimeAttempts = hitTimesMillisecond
 }
 
+// MessageTranslator returns the configured message translator.
+//
+// Returns:
+//   - InboundChannelMessageTranslator[TMessageType]: The message translator instance
 func (
 	b *InboundChannelAdapterBuilder[TMessageType],
 ) MessageTranslator() InboundChannelMessageTranslator[TMessageType] {
@@ -141,6 +153,7 @@ func (b *InboundChannelAdapterBuilder[TMessageType]) BuildInboundAdapter(
 		b.beforeProcessors,
 		b.afterProcessors,
 		b.retryTimeAttempts,
+		b.sendReplyUsingReplyTo,
 	)
 }
 
@@ -163,6 +176,7 @@ func NewInboundChannelAdapter(
 	beforeProcessors []message.MessageHandler,
 	afterProcessors []message.MessageHandler,
 	retryTimeAttempts []int,
+	sendReplyUsingReplyTo bool,
 ) *InboundChannelAdapter {
 	return &InboundChannelAdapter{
 		inboundAdapter:        adapter,
@@ -171,6 +185,7 @@ func NewInboundChannelAdapter(
 		beforeProcessors:      beforeProcessors,
 		afterProcessors:       afterProcessors,
 		retryTimeAttempts:     retryTimeAttempts,
+		sendReplyUsingReplyTo: sendReplyUsingReplyTo,
 	}
 }
 
@@ -214,6 +229,14 @@ func (i *InboundChannelAdapter) RetryAttempts() []int {
 	return i.retryTimeAttempts
 }
 
+// SendReplyUsingReplyTo returns whether reply-to functionality is enabled.
+//
+// Returns:
+//   - bool: True if reply-to is enabled, false otherwise
+func (i *InboundChannelAdapter) SendReplyUsingReplyTo() bool {
+	return i.sendReplyUsingReplyTo
+}
+
 // ReceiveMessage receives a message from the channel, respecting context cancellation.
 //
 // Parameters:
@@ -241,6 +264,13 @@ func (i *InboundChannelAdapter) Close() error {
 	return i.inboundAdapter.Close()
 }
 
+// CommitMessage commits a message to acknowledge its successful processing.
+//
+// Parameters:
+//   - msg: The message to commit
+//
+// Returns:
+//   - error: Error if the commit operation fails, or nil if acknowledged successfully
 func (i *InboundChannelAdapter) CommitMessage(msg *message.Message) error {
 	ackChannel, ok := i.inboundAdapter.(handler.ChannelMessageAcknowledgment)
 	if !ok {

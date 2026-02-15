@@ -16,7 +16,6 @@ package message
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -24,20 +23,11 @@ import (
 // MessageBuilder provides a fluent interface for constructing messages with
 // various configurations including payload, headers, routing, and context.
 type MessageBuilder struct {
-	payload          any
-	origin           string
-	messageId        string
-	route            string
-	messageType      MessageType
-	replyChannel     PublisherChannel
-	customHeaders    CustomHeaders
-	correlationId    string
-	channelName      string
-	replyChannelName string
-	timestamp        time.Time
-	context          context.Context
-	version          string
-	rawMessage       any
+	payload              any
+	header               map[string]string
+	internalReplyChannel PublisherChannel
+	context              context.Context
+	rawMessage           any
 }
 
 // NewMessageBuilder creates a new message builder instance.
@@ -45,7 +35,9 @@ type MessageBuilder struct {
 // Returns:
 //   - *MessageBuilder: new message builder instance
 func NewMessageBuilder() *MessageBuilder {
-	return &MessageBuilder{}
+	return &MessageBuilder{
+		header: map[string]string{},
+	}
 }
 
 // NewMessageBuilderFromMessage creates a new message builder instance from an
@@ -57,25 +49,20 @@ func NewMessageBuilder() *MessageBuilder {
 // Returns:
 //   - *MessageBuilder: new message builder with copied properties
 func NewMessageBuilderFromMessage(msg *Message) *MessageBuilder {
-	return &MessageBuilder{
-		origin:        msg.GetHeaders().Origin,
-		messageId:     msg.GetHeaders().MessageId,
-		payload:       msg.GetPayload(),
-		route:         msg.GetHeaders().Route,
-		messageType:   msg.GetHeaders().MessageType,
-		replyChannel:  msg.GetHeaders().ReplyChannel,
-		customHeaders: msg.GetHeaders().CustomHeaders,
-		correlationId: msg.GetHeaders().CorrelationId,
-		channelName:   msg.GetHeaders().ChannelName,
-		timestamp:     msg.GetHeaders().Timestamp,
-		context:       msg.GetContext(),
-		version:       msg.GetHeaders().Version,
-		rawMessage:    msg.GetRawMessage(),
+
+	builder := &MessageBuilder{
+		payload:    msg.GetPayload(),
+		header:     msg.GetHeader().All(),
+		rawMessage: msg.GetRawMessage(),
 	}
+	return builder
 }
 
 func NewMessageBuilderFromHeaders(headers map[string]string) (*MessageBuilder, error) {
-	messageBuilder := &MessageBuilder{}
+	if headers == nil {
+		headers = map[string]string{}
+	}
+	messageBuilder := NewMessageBuilder()
 	headersMap := map[string]func(value string) error{
 		"origin": func(value string) error {
 			messageBuilder.WithOrigin(value)
@@ -98,16 +85,8 @@ func NewMessageBuilderFromHeaders(headers map[string]string) (*MessageBuilder, e
 			messageBuilder.WithTimestamp(dt)
 			return nil
 		},
-		"replyChannel": func(value string) error {
-			messageBuilder.WithReplyChannelName(value)
-			return nil
-		},
-		"customHeaders": func(value string) error {
-			ch, err := messageBuilder.makeCustomHeaders(value)
-			if err != nil {
-				return err
-			}
-			messageBuilder.WithCustomHeader(ch)
+		"replyTo": func(value string) error {
+			messageBuilder.WithReplyTo(value)
 			return nil
 		},
 		"correlationId": func(value string) error {
@@ -129,11 +108,12 @@ func NewMessageBuilderFromHeaders(headers map[string]string) (*MessageBuilder, e
 	}
 
 	for k, h := range headers {
-		if headersMap[k] == nil {
+		if h == "" {
 			continue
 		}
 
-		if h == "" {
+		if headersMap[k] == nil {
+			messageBuilder.WithCustomHeader(k, h)
 			continue
 		}
 
@@ -161,15 +141,6 @@ func (b *MessageBuilder) chooseMessageType(value string) MessageType {
 	return Document
 }
 
-func (b *MessageBuilder) makeCustomHeaders(value string) (CustomHeaders, error) {
-	var customHeaders CustomHeaders
-	errCh := json.Unmarshal([]byte(value), &customHeaders)
-	if errCh != nil {
-		return nil, errCh
-	}
-	return customHeaders, nil
-}
-
 // WithPayload sets the message payload.
 //
 // Parameters:
@@ -190,7 +161,7 @@ func (b *MessageBuilder) WithPayload(payload any) *MessageBuilder {
 // Returns:
 //   - *MessageBuilder: builder instance for method chaining
 func (b *MessageBuilder) WithMessageType(typeMessage MessageType) *MessageBuilder {
-	b.messageType = typeMessage
+	b.header[HeaderMessageType] = typeMessage.String()
 	return b
 }
 
@@ -202,7 +173,7 @@ func (b *MessageBuilder) WithMessageType(typeMessage MessageType) *MessageBuilde
 // Returns:
 //   - *MessageBuilder: builder instance for method chaining
 func (b *MessageBuilder) WithRoute(route string) *MessageBuilder {
-	b.route = route
+	b.header[HeaderRoute] = route
 	return b
 }
 
@@ -213,20 +184,8 @@ func (b *MessageBuilder) WithRoute(route string) *MessageBuilder {
 //
 // Returns:
 //   - *MessageBuilder: builder instance for method chaining
-func (b *MessageBuilder) WithReplyChannel(value PublisherChannel) *MessageBuilder {
-	b.replyChannel = value
-	return b
-}
-
-// WithCustomHeader sets custom headers for the message.
-//
-// Parameters:
-//   - value: the custom headers to be included in the message
-//
-// Returns:
-//   - *MessageBuilder: builder instance for method chaining
-func (b *MessageBuilder) WithCustomHeader(value CustomHeaders) *MessageBuilder {
-	b.customHeaders = value
+func (b *MessageBuilder) WithInternalReplyChannel(value PublisherChannel) *MessageBuilder {
+	b.internalReplyChannel = value
 	return b
 }
 
@@ -238,7 +197,7 @@ func (b *MessageBuilder) WithCustomHeader(value CustomHeaders) *MessageBuilder {
 // Returns:
 //   - *MessageBuilder: builder instance for method chaining
 func (b *MessageBuilder) WithCorrelationId(value string) *MessageBuilder {
-	b.correlationId = value
+	b.header[HeaderCorrelationId] = value
 	return b
 }
 
@@ -250,7 +209,7 @@ func (b *MessageBuilder) WithCorrelationId(value string) *MessageBuilder {
 // Returns:
 //   - *MessageBuilder: builder instance for method chaining
 func (b *MessageBuilder) WithChannelName(value string) *MessageBuilder {
-	b.channelName = value
+	b.header[HeaderChannelName] = value
 	return b
 }
 
@@ -261,8 +220,8 @@ func (b *MessageBuilder) WithChannelName(value string) *MessageBuilder {
 //
 // Returns:
 //   - *MessageBuilder: builder instance for method chaining
-func (b *MessageBuilder) WithReplyChannelName(value string) *MessageBuilder {
-	b.replyChannelName = value
+func (b *MessageBuilder) WithReplyTo(value string) *MessageBuilder {
+	b.header[HeaderReplyTo] = value
 	return b
 }
 
@@ -286,7 +245,7 @@ func (b *MessageBuilder) WithContext(value context.Context) *MessageBuilder {
 // Returns:
 //   - *MessageBuilder: builder instance for method chaining
 func (b *MessageBuilder) WithMessageId(value string) *MessageBuilder {
-	b.messageId = value
+	b.header[HeaderMessageId] = value
 	return b
 }
 
@@ -298,7 +257,7 @@ func (b *MessageBuilder) WithMessageId(value string) *MessageBuilder {
 // Returns:
 //   - *MessageBuilder: builder instance for method chaining
 func (b *MessageBuilder) WithTimestamp(value time.Time) *MessageBuilder {
-	b.timestamp = value
+	b.header[HeaderTimestamp] = value.Format("2006-01-02 15:04:05")
 	return b
 }
 
@@ -310,7 +269,7 @@ func (b *MessageBuilder) WithTimestamp(value time.Time) *MessageBuilder {
 // Returns:
 //   - *MessageBuilder: builder instance for method chaining
 func (b *MessageBuilder) WithOrigin(value string) *MessageBuilder {
-	b.origin = value
+	b.header[HeaderOrigin] = value
 	return b
 }
 
@@ -322,7 +281,7 @@ func (b *MessageBuilder) WithOrigin(value string) *MessageBuilder {
 // Returns:
 //   - *MessageBuilder: builder instance for method chaining
 func (b *MessageBuilder) WithVersion(value string) *MessageBuilder {
-	b.version = value
+	b.header[HeaderVersion] = value
 	return b
 }
 
@@ -338,38 +297,26 @@ func (b *MessageBuilder) WithRawMessage(value any) *MessageBuilder {
 	return b
 }
 
+func (b *MessageBuilder) WithCustomHeader(key string, value string) *MessageBuilder {
+	b.header[key] = value
+	return b
+}
+
 // Build constructs a new message instance with all configured properties.
 //
 // Returns:
 //   - *Message: the constructed message instance
 func (b *MessageBuilder) Build() *Message {
-	headers := b.buildHeaders()
-	msg := NewMessage(b.payload, headers, b.context)
+	headers := NewHeader(b.header)
+	msg := NewMessage(b.context, b.payload, headers)
+
+	if b.internalReplyChannel != nil {
+		msg.SetInternalReplyChannel(b.internalReplyChannel)
+	}
+
 	if b.rawMessage != nil {
 		msg.SetRawMessage(b.rawMessage)
 	}
-	return msg
-}
 
-// buildHeaders creates the message headers from the builder's configuration.
-//
-// Returns:
-//   - *messageHeaders: the constructed message headers
-func (b *MessageBuilder) buildHeaders() *messageHeaders {
-	headers := NewMessageHeaders(
-		b.origin,
-		b.messageId,
-		b.route,
-		b.messageType,
-		b.replyChannel,
-		b.correlationId,
-		b.channelName,
-		b.replyChannelName,
-		b.timestamp,
-		b.version,
-	)
-	if b.customHeaders != nil {
-		headers.SetCustomHeaders(b.customHeaders)
-	}
-	return headers
+	return msg
 }

@@ -58,6 +58,9 @@ func (f *fakeInboundAdapter) ReceiveMessage(ctx context.Context) (*message.Messa
 	}
 	return msg, nil
 }
+func (f *fakeInboundAdapter) SendReplyUsingReplyTo() bool {
+	return false
+}
 
 type dummyEventDrivenGatewayHandler struct {
 	response chan any
@@ -127,7 +130,6 @@ func TestNewEventDrivenConsumerBuilder_Build(t *testing.T) {
 func TestEventDrivenConsumer_Run(t *testing.T) {
 	t.Run("processes message successfully", func(t *testing.T) {
 		t.Parallel()
-
 		inChannel := channel.NewPointToPointChannel("in")
 		outChannel := make(chan any)
 		in := &fakeInboundAdapter{ch: inChannel}
@@ -165,7 +167,7 @@ func TestEventDrivenConsumer_Run(t *testing.T) {
 		})
 	})
 	t.Run("Receive message Error", func(t *testing.T) {
-
+		t.Parallel()
 		inChannel := channel.NewPointToPointChannel("in")
 		outChannel := make(chan any)
 		in := &fakeInboundAdapter{ch: inChannel}

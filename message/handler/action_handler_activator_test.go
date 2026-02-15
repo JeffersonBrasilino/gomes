@@ -85,7 +85,7 @@ func TestActionHandleActivator_Handle(t *testing.T) {
 				WithChannelName("channel").
 				WithMessageType(message.Command).
 				WithPayload(&mockAction{name: "test"}).
-				WithReplyChannel(replyChan)
+				WithInternalReplyChannel(replyChan)
 
 			if c.description == "invalid payload" {
 				msg.WithPayload("teste")

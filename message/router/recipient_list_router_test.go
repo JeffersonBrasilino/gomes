@@ -46,7 +46,7 @@ func TestHandle(t *testing.T) {
 		WithMessageType(1).
 		WithCorrelationId("cid").
 		WithChannelName("canal1").
-		WithReplyChannelName("rch").
+		WithReplyTo("rch").
 		WithContext(context.Background()).
 		Build()
 	container := container.NewGenericContainer[any, any]()

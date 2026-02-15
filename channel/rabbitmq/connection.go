@@ -20,7 +20,6 @@ import (
 // application.
 var conInstance *connection
 
-
 // connection manages RabbitMQ broker connections with lifecycle management
 // capabilities.
 type connection struct {

@@ -266,9 +266,9 @@ func (a *inboundChannelAdapter) subscribeOnQueue() {
 	)
 
 	if err != nil {
-        a.errorChannel <- fmt.Errorf("failed to start consuming: %w", err)
-        return
-    }
+		a.errorChannel <- fmt.Errorf("failed to start consuming: %w", err)
+		return
+	}
 
 	for msg := range rabbitmqMessages {
 		message, translateErr := a.messageTranslator.ToMessage(msg)

@@ -15,7 +15,6 @@ package bus
 import (
 	"context"
 
-	"github.com/google/uuid"
 	"github.com/jeffersonbrasilino/gomes/message"
 	"github.com/jeffersonbrasilino/gomes/message/handler"
 )
@@ -53,8 +52,8 @@ func (c *QueryBus) Send(
 	ctx context.Context,
 	action handler.Action,
 ) (any, error) {
-	builder := c.buildMessage()
-	msg := builder.WithPayload(action).
+	builder := c.dispatcher.MessageBuilder(message.Query, action, nil)
+	msg := builder.
 		WithRoute(action.Name()).
 		Build()
 
@@ -75,13 +74,12 @@ func (c *QueryBus) Send(
 func (c *QueryBus) SendRaw(
 	ctx context.Context,
 	route string,
-	payload []byte,
+	payload any,
 	headers map[string]string,
 ) (any, error) {
-	builder := c.buildMessage()
-	msg := builder.WithPayload(payload).
+	builder := c.dispatcher.MessageBuilder(message.Query, payload, headers)
+	msg := builder.
 		WithRoute(route).
-		WithCustomHeader(headers).
 		Build()
 	return c.dispatcher.SendMessage(ctx, msg)
 }
@@ -98,8 +96,8 @@ func (c *QueryBus) SendAsync(
 	ctx context.Context,
 	action handler.Action,
 ) error {
-	builder := c.buildMessage()
-	msg := builder.WithPayload(action).
+	builder := c.dispatcher.MessageBuilder(message.Query, action, nil)
+	msg := builder.
 		WithRoute(action.Name()).
 		Build()
 	return c.dispatcher.PublishMessage(ctx, msg)
@@ -121,22 +119,9 @@ func (c *QueryBus) SendRawAsync(
 	payload any,
 	headers map[string]string,
 ) error {
-	builder := c.buildMessage()
-	msg := builder.WithPayload(payload).
+	builder := c.dispatcher.MessageBuilder(message.Query, payload, headers)
+	msg := builder.
 		WithRoute(route).
-		WithCustomHeader(headers).
 		Build()
 	return c.dispatcher.PublishMessage(ctx, msg)
-}
-
-// buildMessage creates a message builder configured for query messages with
-// automatic correlation ID generation.
-//
-// Returns:
-//   - *message.MessageBuilder: configured message builder for queries
-func (c *QueryBus) buildMessage() *message.MessageBuilder {
-	builder := message.NewMessageBuilder().
-		WithMessageType(message.Query).
-		WithCorrelationId(uuid.New().String())
-	return builder
 }

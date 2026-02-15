@@ -49,13 +49,7 @@ func (m *MessageTranslator) FromMessage(msg *message.Message) (
 	*kafka.Message,
 	error,
 ) {
-	headersMap, err := msg.GetHeaders().ToMap()
-	if err != nil {
-		return nil, fmt.Errorf(
-			"[kafka-message-translator] header converter error: %v",
-			err.Error(),
-		)
-	}
+	headersMap := msg.GetHeader()
 
 	contextPropagator := otel.GetTraceContextPropagatorByContext(msg.GetContext())
 	if contextPropagator != nil {
@@ -79,7 +73,7 @@ func (m *MessageTranslator) FromMessage(msg *message.Message) (
 	}
 
 	return &kafka.Message{
-		Key:     []byte(msg.GetHeaders().CorrelationId),
+		Key:     []byte(headersMap.Get(message.HeaderCorrelationId)),
 		Value:   payload,
 		Headers: kafkaHeaders,
 	}, nil

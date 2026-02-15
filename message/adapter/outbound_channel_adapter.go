@@ -28,14 +28,13 @@ type OutboundChannelAdapterBuilder[TMessageType any] struct {
 	channelName       string
 	replyChannelName  string
 	messageTranslator OutboundChannelMessageTranslator[TMessageType]
-	beforeProcessors  []message.MessageHandler
-	afterProcessors   []message.MessageHandler
 }
 
 // OutboundChannelAdapter handles the sending of messages to external systems
 // through configured publisher channels.
 type OutboundChannelAdapter struct {
-	outboundAdapter message.PublisherChannel
+	outboundAdapter  message.PublisherChannel
+	replyChannelName string
 }
 
 // NewOutboundChannelAdapterBuilder creates a new builder instance for configuring
@@ -57,49 +56,7 @@ func NewOutboundChannelAdapterBuilder[T any](
 		referenceName:     referenceName,
 		channelName:       channelName,
 		messageTranslator: messageTranslator,
-		beforeProcessors:  []message.MessageHandler{},
-		afterProcessors:   []message.MessageHandler{},
 	}
-}
-
-// NewOutboundChannelAdapter creates a new outbound channel adapter instance.
-//
-// Parameters:
-//   - adapter: The publisher channel implementation for sending messages
-//
-// Returns:
-//   - *OutboundChannelAdapter: Configured outbound channel adapter
-func NewOutboundChannelAdapter(
-	adapter message.PublisherChannel,
-) *OutboundChannelAdapter {
-	return &OutboundChannelAdapter{
-		outboundAdapter: adapter,
-	}
-}
-
-// WithReferenceName sets the reference name for the adapter builder.
-//
-// Parameters:
-//   - value: The reference name to set
-//
-// Returns:
-//   - *OutboundChannelAdapterBuilder[TMessageType]: Builder instance for method chaining
-func (b *OutboundChannelAdapterBuilder[TMessageType]) WithReferenceName(
-	value string,
-) *OutboundChannelAdapterBuilder[TMessageType] {
-	b.referenceName = value
-	return b
-}
-
-// WithChannelName sets the channel name for the adapter builder.
-//
-// Parameters:
-//   - value: The channel name to set
-func (b *OutboundChannelAdapterBuilder[TMessageType]) WithChannelName(
-	value string,
-) *OutboundChannelAdapterBuilder[TMessageType] {
-	b.channelName = value
-	return b
 }
 
 // WithMessageTranslator sets the message translator for the adapter builder.
@@ -121,28 +78,6 @@ func (b *OutboundChannelAdapterBuilder[TMessageType]) WithReplyChannelName(
 	value string,
 ) *OutboundChannelAdapterBuilder[TMessageType] {
 	b.replyChannelName = value
-	return b
-}
-
-// WithBeforeInterceptors sets the before processing interceptors for the adapter builder.
-//
-// Parameters:
-//   - processors: Variable number of message handlers to execute before processing
-func (b *OutboundChannelAdapterBuilder[TMessageType]) WithBeforeInterceptors(
-	processors ...message.MessageHandler,
-) *OutboundChannelAdapterBuilder[TMessageType] {
-	b.beforeProcessors = processors
-	return b
-}
-
-// WithAfterInterceptors sets the after processing interceptors for the adapter builder.
-//
-// Parameters:
-//   - processors: Variable number of message handlers to execute after processing
-func (b *OutboundChannelAdapterBuilder[TMessageType]) WithAfterInterceptors(
-	processors ...message.MessageHandler,
-) *OutboundChannelAdapterBuilder[TMessageType] {
-	b.afterProcessors = processors
 	return b
 }
 
@@ -199,7 +134,25 @@ func (b *OutboundChannelAdapterBuilder[TMessageType]) BuildOutboundAdapter(
 ) (*OutboundChannelAdapter, error) {
 
 	outboundHandler := NewOutboundChannelAdapter(outboundAdapter)
+	if b.replyChannelName != "" {
+		outboundHandler.replyChannelName = b.replyChannelName
+	}
 	return outboundHandler, nil
+}
+
+// NewOutboundChannelAdapter creates a new outbound channel adapter instance.
+//
+// Parameters:
+//   - adapter: The publisher channel implementation for sending messages
+//
+// Returns:
+//   - *OutboundChannelAdapter: Configured outbound channel adapter
+func NewOutboundChannelAdapter(
+	adapter message.PublisherChannel,
+) *OutboundChannelAdapter {
+	return &OutboundChannelAdapter{
+		outboundAdapter: adapter,
+	}
 }
 
 // Handle processes an outbound message by sending it through the configured publisher
@@ -217,8 +170,12 @@ func (o *OutboundChannelAdapter) Send(
 	ctx context.Context,
 	msg *message.Message,
 ) error {
+
+	if o.replyChannelName != "" {
+		msg.GetHeader().Set(message.HeaderReplyTo, o.replyChannelName)
+	}
 	err := o.outboundAdapter.Send(ctx, msg)
-	if msg.GetHeaders().ReplyChannel != nil {
+	if msg.GetInternalReplyChannel() != nil {
 		go o.publishOnInternalChannel(ctx, msg, err)
 	}
 
@@ -257,8 +214,10 @@ func (o *OutboundChannelAdapter) publishOnInternalChannel(
 	resultMessage := message.NewMessageBuilderFromMessage(msg).
 		WithMessageType(message.Document).
 		WithPayload(payloadMessage).
+		WithReplyTo("").
+		WithChannelName("").
 		Build()
-	msg.GetHeaders().ReplyChannel.Send(ctx, resultMessage)
+	msg.GetInternalReplyChannel().Send(ctx, resultMessage)
 }
 
 // Close closes the outbound channel adapter, releasing associated resources.

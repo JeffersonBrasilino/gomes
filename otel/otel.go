@@ -99,18 +99,18 @@ func NewOtelAttr(key string, value string) OtelAttribute {
 // makeAttributesFromMessage builds a slice of OtelAttribute extracted from a
 // message.Message headers. It maps common messaging header fields to
 // semantic attribute keys used for tracing.
-func makeAttributesFromMessage(message *message.Message) []OtelAttribute {
-	messageHeaders := message.GetHeaders()
-	destinationName := messageHeaders.Route
-	if messageHeaders.ChannelName != "" {
-		destinationName = messageHeaders.ChannelName
+func makeAttributesFromMessage(msg *message.Message) []OtelAttribute {
+	messageHeaders := msg.GetHeader()
+	destinationName := messageHeaders.Get(message.HeaderRoute)
+	if messageHeaders.Get(message.HeaderChannelName) != "" {
+		destinationName = messageHeaders.Get(message.HeaderChannelName)
 	}
 	return []OtelAttribute{
-		NewOtelAttr("messaging.message.id", messageHeaders.MessageId),
-		NewOtelAttr("messaging.message.correlationId", messageHeaders.CorrelationId),
-		NewOtelAttr("command.name", messageHeaders.Route),
-		NewOtelAttr("messaging.type", messageHeaders.MessageType.String()),
-		NewOtelAttr("command.version", messageHeaders.Version),
+		NewOtelAttr("messaging.message.id", messageHeaders.Get(message.HeaderMessageId)),
+		NewOtelAttr("messaging.message.correlationId", messageHeaders.Get(message.HeaderCorrelationId)),
+		NewOtelAttr("command.name", messageHeaders.Get(message.HeaderRoute)),
+		NewOtelAttr("messaging.type", messageHeaders.Get(message.HeaderMessageType)),
+		NewOtelAttr("command.version", messageHeaders.Get(message.HeaderVersion)),
 		NewOtelAttr("messaging.destination.name", destinationName),
 	}
 }

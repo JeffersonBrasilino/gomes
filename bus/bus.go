@@ -16,4 +16,10 @@ type Dispatcher interface {
 		ctx context.Context,
 		msg *message.Message,
 	) error
+
+	MessageBuilder(
+		messageType message.MessageType,
+		payload any,
+		headers map[string]string,
+	) *message.MessageBuilder
 }

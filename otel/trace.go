@@ -226,7 +226,10 @@ func (t *otelTrace) Start(
 			makeAttributesFromMessage(startOptions.message)...,
 		)
 		if name == "" {
-			spanName = makeSpanName(startOptions.spanKind, startOptions.message.GetHeaders().Route)
+			spanName = makeSpanName(
+				startOptions.spanKind,
+				startOptions.message.GetHeader().Get(message.HeaderRoute),
+			)
 		}
 	}
 
