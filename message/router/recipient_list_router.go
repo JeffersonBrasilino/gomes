@@ -63,7 +63,15 @@ func (r *recipientListRouter) Handle(
 		)
 	}
 
-	actionChannel.(message.PublisherChannel).Send(ctx, msg)
+	channel, ok := actionChannel.(message.PublisherChannel)
+	if !ok {
+		return nil, fmt.Errorf(
+			"[recipient-list-router] unprocessable message, channel for action %v does not implement PublisherChannel",
+			route,
+		)
+	}
+
+	channel.Send(ctx, msg)
 
 	return msg, nil
 }

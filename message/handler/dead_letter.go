@@ -73,7 +73,7 @@ func (s *deadLetter) Handle(
 
 	originalPayload, errP := s.convertMessagePayload(msg)
 	if errP != nil {
-		slog.Info("[dead-letter-handler] cannot convert original payload",
+		slog.Error("[dead-letter-handler] cannot convert original payload",
 			"messageId", msg.GetHeader().Get(message.HeaderMessageId),
 			"reason", errP.Error(),
 			"dlqChannelName", s.channel.Name(),
@@ -82,13 +82,12 @@ func (s *deadLetter) Handle(
 		return resultMessage, err
 	}
 
-	ctxDql := context.Background()
-	dlqMessage := s.makeDeadLetterMessage(ctxDql, msg, &deadLetterMessage{
+	dlqMessage := s.makeDeadLetterMessage(ctx, msg, &deadLetterMessage{
 		ReasonError: err.Error(),
 		Payload:     originalPayload,
 	})
 
-	errDql := s.channel.Send(ctxDql, dlqMessage)
+	errDql := s.channel.Send(ctx, dlqMessage)
 	if errDql != nil {
 		slog.Error("[dead-letter-handler] failed to send message to dead letter",
 			"messageId", msg.GetHeader().Get(message.HeaderMessageId),

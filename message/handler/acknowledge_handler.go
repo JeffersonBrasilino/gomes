@@ -65,7 +65,7 @@ func (h *acknowledgeHandler) Handle(
 	resultMessage, err := h.handler.Handle(ctx, msg)
 	errC := h.channelAdapter.CommitMessage(msg)
 	if errC != nil {
-		slog.Info("[acknowledgeHandler-handler] failed to acknowledge message:",
+		slog.Error("[acknowledgeHandler-handler] failed to acknowledge message:",
 			"messageId", msg.GetHeader().Get(message.HeaderMessageId),
 			"reason", errC.Error(),
 		)
