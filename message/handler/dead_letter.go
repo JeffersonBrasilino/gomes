@@ -18,6 +18,7 @@ import (
 	"log/slog"
 
 	"github.com/jeffersonbrasilino/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/otel"
 )
 
 // deadLetter implements the Dead Letter Channel pattern, routing failed messages
@@ -25,6 +26,7 @@ import (
 type deadLetter struct {
 	channel message.PublisherChannel
 	handler message.MessageHandler
+	otelTrace         otel.OtelTrace
 }
 type deadLetterMessage struct {
 	ReasonError string
@@ -48,6 +50,7 @@ func NewDeadLetter(
 	return &deadLetter{
 		channel: channel,
 		handler: handler,
+		otelTrace:         otel.InitTrace("dead-letter-handler"),
 	}
 }
 
@@ -71,6 +74,16 @@ func (s *deadLetter) Handle(
 		return resultMessage, nil
 	}
 
+	ctx, span := s.otelTrace.Start(
+		ctx,
+		"Send message to dead letter",
+		otel.WithMessagingSystemType(otel.MessageSystemTypeInternal),
+		otel.WithSpanOperation(otel.SpanOperationProcess),
+		otel.WithSpanKind(otel.SpanKindInternal),
+		otel.WithMessage(msg),
+	)
+	defer span.End()
+
 	originalPayload, errP := s.convertMessagePayload(msg)
 	if errP != nil {
 		slog.Error("[dead-letter-handler] cannot convert original payload",
@@ -79,7 +92,9 @@ func (s *deadLetter) Handle(
 			"dlqChannelName", s.channel.Name(),
 		)
 
-		return resultMessage, err
+		span.Error(errP, "[dead-letter-handler] cannot convert original payload")
+
+		return resultMessage, errP
 	}
 
 	dlqMessage := s.makeDeadLetterMessage(ctx, msg, &deadLetterMessage{
@@ -94,7 +109,8 @@ func (s *deadLetter) Handle(
 			"reason", errDql.Error(),
 			"dlqChannelName", s.channel.Name(),
 		)
-		return resultMessage, err
+		span.Error(errDql, "[dead-letter-handler] failed to send message to dead letter")
+		return resultMessage, errDql
 	}
 
 	slog.Info("[dead-letter-handler] Sent message to dead letter",
@@ -102,6 +118,7 @@ func (s *deadLetter) Handle(
 		"reason", err.Error(),
 		"dlqChannelName", s.channel.Name(),
 	)
+	span.Success("[dead-letter-handler] sent message to dead letter")
 
 	return resultMessage, err
 }
