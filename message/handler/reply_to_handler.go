@@ -10,6 +10,7 @@ import (
 
 	"github.com/jeffersonbrasilino/gomes/container"
 	"github.com/jeffersonbrasilino/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/otel"
 )
 
 // ErrorResult represents an error response to be sent as a message payload.
@@ -24,6 +25,7 @@ type ErrorResult struct {
 type SendReplyToHandler struct {
 	gomesContainer container.Container[any, any]
 	handler        message.MessageHandler
+	otelTrace      otel.OtelTrace
 }
 
 // NewSendReplyToHandler creates a new send reply-to handler that wraps an existing
@@ -42,6 +44,7 @@ func NewSendReplyToHandler(
 	return &SendReplyToHandler{
 		gomesContainer: container,
 		handler:        handler,
+		otelTrace:      otel.InitTrace("send-reply-to-handler"),
 	}
 }
 
@@ -62,24 +65,40 @@ func (s *SendReplyToHandler) Handle(
 ) (*message.Message, error) {
 
 	replyMessage, err := s.handler.Handle(ctx, msg)
+
+	ctx, span := s.otelTrace.Start(
+		ctx,
+		"Send message to reply channel",
+		otel.WithMessagingSystemType(otel.MessageSystemTypeInternal),
+		otel.WithSpanOperation(otel.SpanOperationProcess),
+		otel.WithSpanKind(otel.SpanKindInternal),
+		otel.WithMessage(msg),
+	)
+	defer span.End()
+
 	replyToChannelName := msg.GetHeader().Get(message.HeaderReplyTo)
 
 	if replyToChannelName == "" {
-		return nil, fmt.Errorf(
+		err := fmt.Errorf(
 			"[send-reply-to-handler] cannot send message: channel not specified",
 		)
+		span.Error(err, "[send-reply-to-handler] cannot send message: channel not specified")
+		return nil, err
 	}
 
 	replyChannel, errch := s.gomesContainer.Get(replyToChannelName)
 	if errch != nil {
+		span.Error(errch, "[send-reply-to-handler] failed to retrieve reply channel from container")
 		return nil, fmt.Errorf("[send-reply-to-handler] %v", errch.Error())
 	}
 
 	channel, ok := replyChannel.(message.PublisherChannel)
 	if !ok {
-		return nil, fmt.Errorf(
+		err := fmt.Errorf(
 			"[send-reply-to-handler] reply channel is not a publisher channel",
 		)
+		span.Error(err, "[send-reply-to-handler] reply channel is not a publisher channel")
+		return nil, err
 	}
 
 	if err != nil {
@@ -94,6 +113,7 @@ func (s *SendReplyToHandler) Handle(
 			Build()
 
 		channel.Send(ctx, rplMessage)
+		span.Success("[send-reply-to-handler] sent error message to reply channel")
 
 		return nil, err
 	}
@@ -108,6 +128,7 @@ func (s *SendReplyToHandler) Handle(
 	}
 
 	channel.Send(ctx, rplMessage)
+	span.Success("[send-reply-to-handler] sent reply message to reply channel")
 
 	if errorMessage, ok := replyMessage.GetPayload().(error); ok {
 		return nil, errorMessage
