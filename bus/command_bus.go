@@ -15,15 +15,13 @@ package bus
 import (
 	"context"
 
-	"github.com/google/uuid"
 	"github.com/jeffersonbrasilino/gomes/message"
-	"github.com/jeffersonbrasilino/gomes/message/endpoint"
 	"github.com/jeffersonbrasilino/gomes/message/handler"
 )
 
 // CommandBus provides command execution capabilities for action processing.
 type CommandBus struct {
-	dispatcher endpoint.Dispatcher
+	dispatcher Dispatcher
 }
 
 // NewCommandBus creates a new command bus instance with the specified dispatcher.
@@ -33,7 +31,7 @@ type CommandBus struct {
 //
 // Returns:
 //   - *CommandBus: new command bus instance
-func NewCommandBus(dispatcher endpoint.Dispatcher) *CommandBus {
+func NewCommandBus(dispatcher Dispatcher) *CommandBus {
 	commandBus := &CommandBus{
 		dispatcher: dispatcher,
 	}
@@ -53,9 +51,8 @@ func (c *CommandBus) Send(
 	ctx context.Context,
 	action handler.Action,
 ) (any, error) {
-
-	builder := c.buildMessage()
-	msg := builder.WithPayload(action).
+	builder := c.dispatcher.MessageBuilder(message.Command, action, nil)
+	msg := builder.
 		WithRoute(action.Name()).
 		Build()
 	return c.dispatcher.SendMessage(ctx, msg)
@@ -75,13 +72,12 @@ func (c *CommandBus) Send(
 func (c *CommandBus) SendRaw(
 	ctx context.Context,
 	route string,
-	payload []byte,
+	payload any,
 	headers map[string]string,
 ) (any, error) {
-	builder := c.buildMessage()
-	msg := builder.WithPayload(payload).
+	builder := c.dispatcher.MessageBuilder(message.Command, payload, headers)
+	msg := builder.
 		WithRoute(route).
-		WithCustomHeader(headers).
 		Build()
 	return c.dispatcher.SendMessage(ctx, msg)
 }
@@ -98,8 +94,8 @@ func (c *CommandBus) SendAsync(
 	ctx context.Context,
 	action handler.Action,
 ) error {
-	builder := c.buildMessage()
-	msg := builder.WithPayload(action).
+	builder := c.dispatcher.MessageBuilder(message.Command, action, nil)
+	msg := builder.
 		WithRoute(action.Name()).
 		Build()
 	return c.dispatcher.PublishMessage(ctx, msg)
@@ -121,22 +117,13 @@ func (c *CommandBus) SendRawAsync(
 	payload any,
 	headers map[string]string,
 ) error {
-	builder := c.buildMessage()
+	builder := c.dispatcher.MessageBuilder(
+		message.Command,
+		payload,
+		headers,
+	)
 	msg := builder.WithPayload(payload).
 		WithRoute(route).
-		WithCustomHeader(headers).
 		Build()
 	return c.dispatcher.PublishMessage(ctx, msg)
-}
-
-// buildMessage creates a message builder configured for command messages with
-// automatic correlation ID generation.
-//
-// Returns:
-//   - *message.MessageBuilder: configured message builder for commands
-func (c *CommandBus) buildMessage() *message.MessageBuilder {
-	builder := message.NewMessageBuilder().
-		WithMessageType(message.Command).
-		WithCorrelationId(uuid.New().String())
-	return builder
 }

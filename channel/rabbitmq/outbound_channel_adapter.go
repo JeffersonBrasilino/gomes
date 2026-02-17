@@ -7,11 +7,29 @@ import (
 
 	"github.com/jeffersonbrasilino/gomes/container"
 	"github.com/jeffersonbrasilino/gomes/message"
-	"github.com/jeffersonbrasilino/gomes/message/channel/adapter"
+	"github.com/jeffersonbrasilino/gomes/message/adapter"
 	"github.com/jeffersonbrasilino/gomes/message/endpoint"
 	"github.com/jeffersonbrasilino/gomes/otel"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
+
+// Producer channel type constants.
+const (
+	ProducerQueue producerChannelType = iota
+	ProducerExchange
+)
+
+// Exchange type constants following AMQP specification.
+const (
+	ExchangeFanout exchangeType = iota
+	ExchangeDirect
+	ExchangeTopic
+	ExchangeHeaders
+)
+
+type exchangeType int8
+
+type producerChannelType int8
 
 // publisherChannelAdapterBuilder provides a builder pattern for creating
 // RabbitMQ outbound channel adapters with connection, queue, or exchange
@@ -22,6 +40,11 @@ type publisherChannelAdapterBuilder struct {
 	exchangeRoutingKeys     string
 	channelType             producerChannelType
 	exchangeType            exchangeType
+	durable                 bool
+	deleteUnused            bool
+	exclusive               bool
+	noWait                  bool
+	args                    amqp.Table
 }
 
 // outboundChannelAdapter implements the OutboundChannelAdapter interface for
@@ -65,6 +88,11 @@ func NewPublisherChannelAdapterBuilder(
 		"",
 		ProducerQueue,
 		ExchangeDirect,
+		true,  // durable
+		false, // delete when unused
+		false, // exclusive
+		false, // no-wait
+		nil,   // arguments
 	}
 	return builder
 }
@@ -95,6 +123,23 @@ func NewOutboundChannelAdapter(
 		exchangeRoutingKeys: exchangeRoutingKeys,
 		channelType:         channelType,
 		otelTrace:           otel.InitTrace("rabbitmq-outbound-channel-adapter"),
+	}
+}
+
+// Type returns the AMQP exchange type string representation.
+//
+// Returns:
+//   - string: AMQP exchange type constant
+func (t exchangeType) Type() string {
+	switch t {
+	case ExchangeFanout:
+		return amqp.ExchangeFanout
+	case ExchangeHeaders:
+		return amqp.ExchangeHeaders
+	case ExchangeTopic:
+		return amqp.ExchangeTopic
+	default:
+		return amqp.ExchangeDirect
 	}
 }
 
@@ -149,6 +194,73 @@ func (b *publisherChannelAdapterBuilder) WithChannelType(
 	return b
 }
 
+// WithDurable sets the durability flag for the queue or exchange declaration.
+// When true, the queue/exchange will survive broker restart.
+//
+// Parameters:
+//   - data: durability flag (true = durable, false = transient)
+//
+// Returns:
+//   - *publisherChannelAdapterBuilder: builder for method chaining
+func (b *publisherChannelAdapterBuilder) WithDurable(data bool) *publisherChannelAdapterBuilder {
+	b.durable = data
+	return b
+}
+
+// WithDeleteUnused sets whether the queue or exchange should be deleted when
+// it is no longer in use (no consumers/bindings).
+//
+// Parameters:
+//   - data: delete when unused flag (true = auto-delete, false = persistent)
+//
+// Returns:
+//   - *publisherChannelAdapterBuilder: builder for method chaining
+func (b *publisherChannelAdapterBuilder) WithDeleteUnused(data bool) *publisherChannelAdapterBuilder {
+	b.deleteUnused = data
+	return b
+}
+
+// WithExclusive sets the exclusivity flag for the queue or exchange.
+// When true, the resource is exclusive to the connection that declares it.
+//
+// Parameters:
+//   - data: exclusive flag (true = exclusive, false = non-exclusive)
+//
+// Returns:
+//   - *publisherChannelAdapterBuilder: builder for method chaining
+func (b *publisherChannelAdapterBuilder) WithExclusive(data bool) *publisherChannelAdapterBuilder {
+	b.exclusive = data
+	return b
+}
+
+// WithNoWait sets the no-wait flag for the queue or exchange declaration.
+// When true, the method returns immediately without waiting for the server
+// to confirm the operation.
+//
+// Parameters:
+//   - data: no-wait flag (true = no-wait, false = wait for confirmation)
+//
+// Returns:
+//   - *publisherChannelAdapterBuilder: builder for method chaining
+func (b *publisherChannelAdapterBuilder) WithNoWait(data bool) *publisherChannelAdapterBuilder {
+	b.noWait = data
+	return b
+}
+
+// WithArguments sets optional arguments table for the queue or exchange
+// declaration. Arguments can contain vendor-specific extensions and
+// modifications (e.g., message TTL, max length).
+//
+// Parameters:
+//   - args: AMQP table containing optional arguments
+//
+// Returns:
+//   - *publisherChannelAdapterBuilder: builder for method chaining
+func (b *publisherChannelAdapterBuilder) WithArguments(args amqp.Table) *publisherChannelAdapterBuilder {
+	b.args = args
+	return b
+}
+
 // Build constructs a RabbitMQ outbound channel adapter from the dependency
 // container by retrieving the connection and creating a producer channel.
 //
@@ -170,16 +282,39 @@ func (b *publisherChannelAdapterBuilder) Build(
 		)
 	}
 
-	producer, err := con.(*connection).Producer(
-		b.ChannelName(),
-		b.channelType,
-		b.exchangeType,
-	)
+	producer, err := con.(*connection).GetConnection().Channel()
+	if err != nil {
+		return nil, fmt.Errorf(
+			"[RabbitMQ-outbound-channel] failed to create producer channel: %w",
+			err,
+		)
+	}
+
+	if b.channelType == ProducerExchange {
+		err = producer.ExchangeDeclare(
+			b.ChannelName(),
+			b.exchangeType.Type(),
+			b.durable,
+			b.deleteUnused,
+			b.exclusive,
+			b.noWait,
+			b.args,
+		)
+	} else {
+		_, err = producer.QueueDeclare(
+			b.ChannelName(),
+			b.durable,
+			b.deleteUnused,
+			b.exclusive,
+			b.noWait,
+			b.args,
+		)
+	}
 
 	if err != nil {
 		return nil, fmt.Errorf(
-			"[RabbitMQ-outbound-channel] %s",
-			err.Error(),
+			"[RabbitMQ-outbound-channel] failed to declare channel: %w",
+			err,
 		)
 	}
 
@@ -256,14 +391,6 @@ func (a *outboundChannelAdapter) Send(
 		false, // immediate
 		*msgToSend,
 	)
-
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf(
-			"[RabbitMQ OUTBOUND CHANNEL] Context cancelled after sending",
-		)
-	default:
-	}
 	return err
 }
 

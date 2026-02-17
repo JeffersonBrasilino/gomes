@@ -16,18 +16,7 @@ type InboundChannelAdapter interface {
 	ReceiveMessage(ctx context.Context) (*message.Message, error)
 	RetryAttempts() []int
 	Close() error
-}
-
-type Dispatcher interface {
-	SendMessage(
-		ctx context.Context,
-		msg *message.Message,
-	) (any, error)
-
-	PublishMessage(
-		ctx context.Context,
-		msg *message.Message,
-	) error
+	SendReplyUsingReplyTo() bool
 }
 
 type OutboundChannelAdapter interface {

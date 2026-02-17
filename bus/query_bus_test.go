@@ -26,6 +26,21 @@ func (m *mockQDispatcher) PublishMessage(ctx context.Context, msg *message.Messa
 	return m.publishErr
 }
 
+func (c *mockQDispatcher) MessageBuilder(
+	messageType message.MessageType,
+	payload any,
+	headers map[string]string,
+) *message.MessageBuilder {
+	builder, _ := message.NewMessageBuilderFromHeaders(headers)
+	builder.WithMessageType(messageType)
+	builder.WithPayload(payload)
+	if val, ok := headers[message.HeaderCorrelationId]; !ok || val == "" {
+		builder.WithCorrelationId("123445")
+	}
+
+	return builder
+}
+
 // Mock action for handler.Action
 type mockqAction struct {
 	name string

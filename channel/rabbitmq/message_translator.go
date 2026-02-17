@@ -38,14 +38,8 @@ func NewMessageTranslator() *MessageTranslator {
 func (m *MessageTranslator) FromMessage(
 	msg *message.Message,
 ) (*amqp.Publishing, error) {
-	headersMap, err := msg.GetHeaders().ToMap()
-	if err != nil {
-		return nil, fmt.Errorf(
-			"[rabbitMQ-message-translator] header converter error: %v",
-			err.Error(),
-		)
-	}
 
+	headersMap := msg.GetHeader()
 	contextPropagator := otel.GetTraceContextPropagatorByContext(
 		msg.GetContext(),
 	)

@@ -58,12 +58,20 @@ func (r *recipientListRouter) Handle(
 
 	if err != nil {
 		return nil, fmt.Errorf(
-			"unprocessable message, channel handler for action for route %v not exists",
+			"[recipient-list-router] unprocessable message, handler for action %v not exists",
 			route,
 		)
 	}
 
-	actionChannel.(message.PublisherChannel).Send(ctx, msg)
+	channel, ok := actionChannel.(message.PublisherChannel)
+	if !ok {
+		return nil, fmt.Errorf(
+			"[recipient-list-router] unprocessable message, channel for action %v does not implement PublisherChannel",
+			route,
+		)
+	}
+
+	channel.Send(ctx, msg)
 
 	return msg, nil
 }
@@ -78,12 +86,12 @@ func (r *recipientListRouter) Handle(
 //   - string: the determined route name
 func (r *recipientListRouter) chooseRoute(msg *message.Message) string {
 	var route string
-	if msg.GetHeaders().ChannelName != "" {
-		route = msg.GetHeaders().ChannelName
+	if msg.GetHeader().Get(message.HeaderChannelName) != "" {
+		route = msg.GetHeader().Get(message.HeaderChannelName)
 	}
 
-	if msg.GetHeaders().Route != "" && route == "" {
-		route = msg.GetHeaders().Route
+	if msg.GetHeader().Get(message.HeaderRoute) != "" && route == "" {
+		route = msg.GetHeader().Get(message.HeaderRoute)
 	}
 	return route
 }

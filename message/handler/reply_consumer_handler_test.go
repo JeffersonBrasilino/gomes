@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/jeffersonbrasilino/gomes/container"
 	"github.com/jeffersonbrasilino/gomes/message"
 	"github.com/jeffersonbrasilino/gomes/message/handler"
 )
@@ -50,18 +51,19 @@ func (d *invalidConsumerChannel) Name() string {
 	return "invalid channel"
 }
 func TestReplyConsumerHandler_Handle(t *testing.T) {
-	chn := make(chan *message.Message, 50)
-	ch := &mockConsumerChannel{msgReceived: chn}
 	t.Run("should process reply message successfully", func(t *testing.T) {
 		t.Parallel()
+		chn := make(chan *message.Message, 50)
+		ch := &mockConsumerChannel{msgReceived: chn}
 		requestMessage := message.NewMessageBuilder().
 			WithPayload("payload").
 			WithMessageType(message.Command).
-			WithReplyChannel(ch).
+			WithInternalReplyChannel(ch).
 			Build()
 		responseMessage := message.NewMessageBuilder().WithPayload("ok").Build()
 		ch.Send(context.Background(), responseMessage)
-		h := handler.NewReplyConsumerHandler()
+		container := container.NewGenericContainer[any, any]()
+		h := handler.NewReplyConsumerHandler(container)
 		res, err := h.Handle(context.Background(), requestMessage)
 
 		if err != nil {
@@ -76,9 +78,10 @@ func TestReplyConsumerHandler_Handle(t *testing.T) {
 		requestMessage := message.NewMessageBuilder().
 			WithPayload("payload").
 			WithMessageType(message.Command).
-			WithReplyChannel(nil).
+			WithInternalReplyChannel(nil).
 			Build()
-		h := handler.NewReplyConsumerHandler()
+		container := container.NewGenericContainer[any, any]()
+		h := handler.NewReplyConsumerHandler(container)
 		res, err := h.Handle(context.Background(), requestMessage)
 		if err.Error() != "reply channel not found" {
 			t.Errorf("Expected error for nil channel, got: %v", err)
@@ -89,16 +92,19 @@ func TestReplyConsumerHandler_Handle(t *testing.T) {
 	})
 	t.Run("should return error when handler processing", func(t *testing.T) {
 		t.Parallel()
+		chn := make(chan *message.Message, 50)
+		ch := &mockConsumerChannel{msgReceived: chn}
 		requestMessage := message.NewMessageBuilder().
 			WithPayload("payload").
 			WithMessageType(message.Command).
-			WithReplyChannel(ch).
+			WithInternalReplyChannel(ch).
 			Build()
 
 		responseMessage := message.NewMessageBuilder().WithPayload("error").Build()
 		ch.Send(context.Background(), responseMessage)
 
-		h := handler.NewReplyConsumerHandler()
+		container := container.NewGenericContainer[any, any]()
+		h := handler.NewReplyConsumerHandler(container)
 		res, err := h.Handle(context.Background(), requestMessage)
 
 		if err.Error() != "error processing" {
@@ -107,19 +113,23 @@ func TestReplyConsumerHandler_Handle(t *testing.T) {
 		if res != nil {
 			t.Error("Expected nil message for nil channel")
 		}
+
 	})
 	t.Run("should return error when error message type", func(t *testing.T) {
 		t.Parallel()
+		chn := make(chan *message.Message, 50)
+		ch := &mockConsumerChannel{msgReceived: chn}
 		requestMessage := message.NewMessageBuilder().
 			WithPayload("payload").
 			WithMessageType(message.Command).
-			WithReplyChannel(ch).
+			WithInternalReplyChannel(ch).
 			Build()
 
 		responseMessage := message.NewMessageBuilder().WithPayload(fmt.Errorf("error")).Build()
 		ch.Send(context.Background(), responseMessage)
 
-		h := handler.NewReplyConsumerHandler()
+		container := container.NewGenericContainer[any, any]()
+		h := handler.NewReplyConsumerHandler(container)
 		res, err := h.Handle(context.Background(), requestMessage)
 
 		if err.Error() != "error" {
@@ -132,13 +142,15 @@ func TestReplyConsumerHandler_Handle(t *testing.T) {
 
 	t.Run("should return error when invalid consumer channel", func(t *testing.T) {
 		t.Parallel()
+
 		requestMessage := message.NewMessageBuilder().
 			WithPayload("payload").
 			WithMessageType(message.Command).
-			WithReplyChannel(&invalidConsumerChannel{}).
+			WithInternalReplyChannel(&invalidConsumerChannel{}).
 			Build()
 
-		h := handler.NewReplyConsumerHandler()
+		container := container.NewGenericContainer[any, any]()
+		h := handler.NewReplyConsumerHandler(container)
 		res, err := h.Handle(context.Background(), requestMessage)
 
 		if err.Error() != "reply channel is not a consumer channel" {
@@ -148,5 +160,4 @@ func TestReplyConsumerHandler_Handle(t *testing.T) {
 			t.Error("Expected nil message for nil channel")
 		}
 	})
-	t.Cleanup(func() { close(chn) })
 }

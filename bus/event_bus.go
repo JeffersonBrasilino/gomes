@@ -15,16 +15,14 @@ package bus
 import (
 	"context"
 
-	"github.com/google/uuid"
 	"github.com/jeffersonbrasilino/gomes/message"
-	"github.com/jeffersonbrasilino/gomes/message/endpoint"
 	"github.com/jeffersonbrasilino/gomes/message/handler"
 )
 
 // EventBus provides event publishing capabilities for broadcasting events
 // throughout the system.
 type EventBus struct {
-	dispatcher endpoint.Dispatcher
+	dispatcher Dispatcher
 }
 
 // NewEventBus creates a new event bus instance with the specified dispatcher.
@@ -34,7 +32,7 @@ type EventBus struct {
 //
 // Returns:
 //   - *EventBus: new event bus instance
-func NewEventBus(dispatcher endpoint.Dispatcher) *EventBus {
+func NewEventBus(dispatcher Dispatcher) *EventBus {
 
 	eventBus := &EventBus{
 		dispatcher: dispatcher,
@@ -51,8 +49,8 @@ func NewEventBus(dispatcher endpoint.Dispatcher) *EventBus {
 // Returns:
 //   - error: error if publishing fails
 func (c *EventBus) Publish(ctx context.Context, action handler.Action) error {
-	builder := c.buildMessage()
-	msg := builder.WithPayload(action).
+	builder := c.dispatcher.MessageBuilder(message.Event, action, nil)
+	msg := builder.
 		WithRoute(action.Name()).
 		Build()
 	return c.dispatcher.PublishMessage(ctx, msg)
@@ -74,22 +72,9 @@ func (c *EventBus) PublishRaw(
 	payload any,
 	headers map[string]string,
 ) error {
-	builder := c.buildMessage()
-	msg := builder.WithPayload(payload).
+	builder := c.dispatcher.MessageBuilder(message.Event, payload, headers)
+	msg := builder.
 		WithRoute(route).
-		WithCustomHeader(headers).
 		Build()
 	return c.dispatcher.PublishMessage(ctx, msg)
-}
-
-// buildMessage creates a message builder configured for event messages with
-// automatic correlation ID generation.
-//
-// Returns:
-//   - *message.MessageBuilder: configured message builder for events
-func (c *EventBus) buildMessage() *message.MessageBuilder {
-	builder := message.NewMessageBuilder().
-		WithMessageType(message.Event).
-		WithCorrelationId(uuid.New().String())
-	return builder
 }

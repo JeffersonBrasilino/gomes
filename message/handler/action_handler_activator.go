@@ -30,7 +30,7 @@ type Action interface {
 // ActionHandler defines the contract for handling specific action types with
 // generic input and output types.
 type ActionHandler[T Action, U any] interface {
-	Handle(ctx context.Context, action T) (U, error)
+	Handle(ctx context.Context, payload T) (U, error)
 }
 
 // ActionHandleActivatorBuilder provides a builder pattern for creating action
@@ -40,9 +40,17 @@ type ActionHandleActivatorBuilder[TInput Action, TOutput any] struct {
 	handler       ActionHandler[TInput, TOutput]
 }
 
+type MessageHeaderAccessor interface {
+	SetMessageHeader(header message.Header)
+}
+
 // ActionHandleActivator processes actions by delegating to the appropriate
 // handler and managing the response through reply channels.
-type ActionHandleActivator[THandler ActionHandler[TInput, TOutput], TInput Action, TOutput any] struct {
+type ActionHandleActivator[
+	THandler ActionHandler[TInput, TOutput],
+	TInput Action,
+	TOutput any,
+] struct {
 	handler THandler
 }
 
@@ -127,8 +135,13 @@ func (c *ActionHandleActivator[THandler, TInput, TOutput]) Handle(
 	var action TInput
 	action, ok := msg.GetPayload().(TInput)
 	resultMessageBuilder := message.NewMessageBuilder().
-		WithChannelName(msg.GetHeaders().ReplyChannel.Name()).
-		WithMessageType(message.Document)
+		WithChannelName(msg.GetInternalReplyChannel().Name()).
+		WithMessageType(message.Document).
+		WithCorrelationId(msg.GetHeader().Get(message.HeaderCorrelationId))
+
+	if replyToMessage := msg.GetHeader().Get(message.HeaderReplyTo); replyToMessage != "" {
+		resultMessageBuilder.WithChannelName(replyToMessage)
+	}
 
 	if !ok {
 		payload, ok := msg.GetPayload().([]byte)
@@ -150,6 +163,10 @@ func (c *ActionHandleActivator[THandler, TInput, TOutput]) Handle(
 			c.sendResponseToReplyChannel(ctx, msg, resultMessageBuilder.Build())
 			return nil, err
 		}
+	}
+
+	if accessor, ok := any(c.handler).(MessageHeaderAccessor); ok {
+		accessor.SetMessageHeader(msg.GetHeader())
 	}
 
 	output, err := c.executeAction(ctx, action)
@@ -188,7 +205,7 @@ func (c *ActionHandleActivator[THandler, TInput, TOutput]) sendResponseToReplyCh
 	requestMessage,
 	responseMessage *message.Message,
 ) {
-	replyChannel := requestMessage.GetHeaders().ReplyChannel
+	replyChannel := requestMessage.GetInternalReplyChannel()
 	if replyChannel != nil {
 		replyChannel.Send(ctx, responseMessage)
 	}

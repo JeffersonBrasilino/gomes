@@ -102,13 +102,16 @@ func (c *PointToPointChannel) Subscribe(callable func(m *message.Message)) {
 //   - *message.Message: The received message
 //   - error: Error if the channel is closed or no message is available
 func (c *PointToPointChannel) Receive(ctx context.Context) (*message.Message, error) {
-	result, hasOpen := <-c.channel
-	if !hasOpen {
-		c.hasOpen = false
-		return nil, errors.New("channel has not been opened")
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result, hasOpen := <-c.channel:
+		if !hasOpen {
+			c.hasOpen = false
+			return nil, errors.New("channel has not been opened")
+		}
+		return result, nil
 	}
-
-	return result, nil
 }
 
 // Close gracefully closes the point-to-point channel and releases associated resources.

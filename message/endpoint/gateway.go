@@ -47,6 +47,7 @@ type gatewayBuilder struct {
 	replyChannelName         string
 	acknowledgeChannel       handler.ChannelMessageAcknowledgment
 	retryHitTimeMilliseconds []int
+	sendReplyUsingReplyTo    bool
 }
 
 // Gateway represents a message processing gateway that handles message routing,
@@ -71,27 +72,6 @@ func NewGatewayBuilder(
 ) *gatewayBuilder {
 	return &gatewayBuilder{
 		referenceName:      referenceName,
-		requestChannelName: requestChannelName,
-	}
-}
-
-// NewGateway creates a new gateway instance.
-//
-// Parameters:
-//   - messageProcessor: the message handler for processing messages
-//   - replyChannelName: name of the reply channel
-//   - requestChannelName: name of the request channel
-//
-// Returns:
-//   - *Gateway: configured gateway instance
-func NewGateway(
-	messageProcessor message.MessageHandler,
-	replyChannelName string,
-	requestChannelName string,
-) *Gateway {
-	return &Gateway{
-		messageProcessor:   messageProcessor,
-		replyChannelName:   replyChannelName,
 		requestChannelName: requestChannelName,
 	}
 }
@@ -184,6 +164,15 @@ func (b *gatewayBuilder) WithRetry(
 	return b
 }
 
+// WithSendReplyUsingReplyTo enables reply-to functionality for the gateway builder.
+//
+// Returns:
+//   - *gatewayBuilder: builder instance for method chaining
+func (b *gatewayBuilder) WithSendReplyUsingReplyTo() *gatewayBuilder {
+	b.sendReplyUsingReplyTo = true
+	return b
+}
+
 // Build constructs a Gateway from the dependency container with configured
 // interceptors, dead letter channel, and reply channel.
 //
@@ -208,7 +197,7 @@ func (b *gatewayBuilder) Build(
 		handler.NewContextHandler(router.NewRecipientListRouter(container)),
 	)
 	messageRouter.AddHandler(
-		handler.NewContextHandler(handler.NewReplyConsumerHandler()),
+		handler.NewContextHandler(handler.NewReplyConsumerHandler(container)),
 	)
 
 	if b.afterInterceptors != nil {
@@ -221,6 +210,15 @@ func (b *gatewayBuilder) Build(
 		messageRouter = router.NewRouter().
 			AddHandler(
 				handler.NewRetryHandler(b.retryHitTimeMilliseconds, messageRouter),
+			)
+	}
+
+	if b.sendReplyUsingReplyTo == true {
+		messageRouter = router.NewRouter().
+			AddHandler(
+				handler.NewContextHandler(
+					handler.NewSendReplyToHandler(messageRouter, container),
+				),
 			)
 	}
 
@@ -240,13 +238,32 @@ func (b *gatewayBuilder) Build(
 
 	if b.acknowledgeChannel != nil {
 		messageRouter = router.NewRouter().AddHandler(
-			handler.NewContextHandler(
-				handler.NewAcknowledgeHandler(b.acknowledgeChannel, messageRouter),
-			),
+			handler.NewAcknowledgeHandler(b.acknowledgeChannel, messageRouter),
 		)
 	}
 
 	return NewGateway(messageRouter, b.replyChannelName, b.requestChannelName), nil
+}
+
+// NewGateway creates a new gateway instance.
+//
+// Parameters:
+//   - messageProcessor: the message handler for processing messages
+//   - replyChannelName: name of the reply channel
+//   - requestChannelName: name of the request channel
+//
+// Returns:
+//   - *Gateway: configured gateway instance
+func NewGateway(
+	messageProcessor message.MessageHandler,
+	replyChannelName string,
+	requestChannelName string,
+) *Gateway {
+	return &Gateway{
+		messageProcessor:   messageProcessor,
+		replyChannelName:   replyChannelName,
+		requestChannelName: requestChannelName,
+	}
 }
 
 // Execute processes a message through the gateway's processing pipeline with
@@ -298,32 +315,36 @@ func (g *Gateway) executeAsync(
 ) {
 	defer close(responseChannel)
 
+	select {
+	case <-ctx.Done():
+		responseChannel <- ctx.Err()
+	default:
+	}
+
 	messageToProcess := message.NewMessageBuilderFromMessage(msg)
 	messageToProcess.WithChannelName(g.requestChannelName)
 	messageToProcess.WithContext(ctx)
 	if g.replyChannelName != "" {
-		messageToProcess.WithReplyChannelName(g.replyChannelName)
+		messageToProcess.WithReplyTo(g.replyChannelName)
 	}
 
 	internalReplyChannel := g.makeInternalChannel()
-	messageToProcess.WithReplyChannel(internalReplyChannel)
+	defer internalReplyChannel.Close()
+
+	messageToProcess.WithInternalReplyChannel(internalReplyChannel)
 
 	resultMessage, err := g.messageProcessor.Handle(ctx, messageToProcess.Build())
 	if err != nil {
-		internalReplyChannel.Close()
 		responseChannel <- err
+		return
 	}
 
 	select {
 	case <-ctx.Done():
-		responseChannel <- fmt.Errorf(
-			"[gateway]: Context cancelled after processing, before sending result",
-		)
+		responseChannel <- ctx.Err()
 		return
-	default:
+	case responseChannel <- resultMessage:
 	}
-
-	responseChannel <- resultMessage
 }
 
 // makeInternalChannel creates an internal point-to-point channel for handling

@@ -15,23 +15,44 @@ package message
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-// MessageType represents the type of a message in the system.
-type MessageType int8
-
 // MessageType constants define the different types of messages supported by the
 // system.
 const (
-	Command  MessageType = iota // Command messages for actions
-	Query                       // Query messages for data retrieval
-	Event                       // Event messages for notifications
-	Document                    // Document messages for data transfer
+	Command             MessageType = iota // Command messages for actions
+	Query                                  // Query messages for data retrieval
+	Event                                  // Event messages for notifications
+	Document                               // Document messages for data transfer
+	HeaderOrigin        = "origin"
+	HeaderRoute         = "route"
+	HeaderMessageType   = "messageType"
+	HeaderTimestamp     = "timestamp"
+	HeaderCorrelationId = "correlationId"
+	HeaderChannelName   = "channelName"
+	HeaderMessageId     = "messageId"
+	HeaderReplyTo       = "replyTo"
+	HeaderVersion       = "version"
 )
+
+var restrictedHeaders = []string{
+	HeaderMessageId,
+	HeaderMessageType,
+	HeaderTimestamp,
+	HeaderOrigin,
+}
+
+// MessageType represents the type of a message in the system.
+type MessageType int8
+
+// Header represents a map of header key-value pairs for message metadata.
+type Header map[string]string
 
 // MessageHandler defines the contract for processing messages in the system.
 type MessageHandler interface {
@@ -59,105 +80,88 @@ type SubscriberChannel interface {
 	Unsubscribe() error
 }
 
-// customHeaders represents a map of custom header key-value pairs.
-type CustomHeaders map[string]string
-
-// messageHeaders contains all the metadata associated with a message including
-// routing information, timestamps, and custom headers.
-type messageHeaders struct {
-	Origin           string
-	Route            string
-	MessageType      MessageType
-	Timestamp        time.Time
-	ReplyChannel     PublisherChannel
-	CustomHeaders    CustomHeaders
-	CorrelationId    string
-	ChannelName      string
-	MessageId        string
-	ReplyChannelName string
-	Version          string
-}
-
 // Message represents a message in the system with payload, headers, and context.
 type Message struct {
-	payload    any
-	headers    *messageHeaders
-	context    context.Context
-	rawMessage any
+	payload              any
+	header               Header
+	context              context.Context
+	rawMessage           any
+	internalreplyChannel PublisherChannel
 }
 
-// NewMessageHeaders creates a new message headers instance with the specified
-// parameters and automatically generated message ID and timestamp.
+// NewHeader creates a new header with default values and custom attributes.
+// It automatically sets MessageId, Timestamp, Origin, and Version if not provided.
 //
 // Parameters:
-//   - route: the routing information for the message
-//   - messageType: the type of the message
-//   - replyChannel: the channel for reply messages
-//   - correlationId: the correlation identifier for message tracking
-//   - channelName: the name of the target channel
-//   - replyChannelName: the name of the reply channel
+//   - attributes: Map of custom header key-value pairs, or nil for empty map
 //
 // Returns:
-//   - *messageHeaders: new message headers instance
-func NewMessageHeaders(
-	origin string,
-	messageId string,
-	route string,
-	messageType MessageType,
-	replyChannel PublisherChannel,
-	correlationId string,
-	channelName string,
-	replyChannelName string,
-	timestamp time.Time,
-	version string,
-) *messageHeaders {
-	if messageId == "" {
-		messageId = uuid.New().String()
+//   - Header: New header instance with defaults and custom attributes
+func NewHeader(attributes map[string]string) Header {
+	if attributes == nil {
+		attributes = make(map[string]string)
 	}
-	if timestamp.IsZero() {
-		timestamp = time.Now()
+
+	attributes[HeaderMessageId] = uuid.New().String()
+
+	if val, ok := attributes[HeaderTimestamp]; !ok || val == "" {
+		attributes[HeaderTimestamp] = time.Now().Format("2006-01-02 15:04:05")
 	}
-	if origin == "" {
-		origin = "gomes"
+
+	if val, ok := attributes[HeaderOrigin]; !ok || val == "" {
+		attributes[HeaderOrigin] = "Gomes"
 	}
-	if version == "" {
-		version = "1.0"
+
+	if val, ok := attributes[HeaderVersion]; !ok || val == "" {
+		attributes[HeaderVersion] = "1.0"
 	}
-	return &messageHeaders{
-		Origin:           origin,
-		MessageId:        messageId,
-		Route:            route,
-		MessageType:      messageType,
-		Timestamp:        timestamp,
-		ReplyChannel:     replyChannel,
-		CustomHeaders:    make(CustomHeaders),
-		CorrelationId:    correlationId,
-		ChannelName:      channelName,
-		ReplyChannelName: replyChannelName,
-		Version:          version,
-	}
+
+	return Header(attributes)
 }
 
-// NewMessage creates a new message instance with the specified payload, headers,
-// and context.
+// Set sets a custom header value. Restricted headers cannot be set manually.
 //
 // Parameters:
-//   - payload: the data carried by the message
-//   - headers: the message headers containing metadata
-//   - context: the context for the message
+//   - key: The header key to set
+//   - value: The header value
 //
 // Returns:
-//   - *Message: new message instance
-func NewMessage(
-	payload any,
-	headers *messageHeaders,
-	context context.Context,
-) *Message {
-	return &Message{
-		payload: payload,
-		headers: headers,
-		context: context,
+//   - error: Error if the header key is restricted
+func (h Header) Set(key string, value string) error {
+
+	if slices.Contains(restrictedHeaders, key) {
+		return fmt.Errorf(
+			"header %s is restricted and cannot be set manually",
+			key,
+		)
 	}
+
+	h[key] = value
+	return nil
+}
+
+// Get retrieves a header value by key.
+//
+// Parameters:
+//   - key: The header key to retrieve
+//
+// Returns:
+//   - string: The header value, or empty string if not found
+func (h Header) Get(key string) string {
+	val, ok := h[key]
+	if !ok {
+		return ""
+	}
+	return val
+}
+
+// All returns a copy of all headers as a map.
+//
+// Returns:
+//   - map[string]string: A shallow copy of all headers
+func (h Header) All() map[string]string {
+	headerCopy := maps.Clone(h)
+	return headerCopy
 }
 
 // String returns the string representation of a MessageType.
@@ -176,42 +180,26 @@ func (m MessageType) String() string {
 	return "Document"
 }
 
-// SetCustomHeaders sets the custom headers for the message.
+// NewMessage creates a new message instance with the specified payload, headers,
+// and context.
 //
 // Parameters:
-//   - data: the custom headers to be set
-func (m *messageHeaders) SetCustomHeaders(data CustomHeaders) {
-	m.CustomHeaders = data
-}
-
-// ToMap converts the message headers to a map[string]string representation.
+//   - payload: the data carried by the message
+//   - headers: the message headers containing metadata
+//   - context: the context for the message
 //
 // Returns:
-//   - map[string]string: a map containing all header fields as strings
-//   - error: error if marshaling custom headers fails
-func (m *messageHeaders) ToMap() (map[string]string, error) {
-	chs, err := json.Marshal(m.CustomHeaders)
-	if err != nil {
-		return nil, err
+//   - *Message: new message instance
+func NewMessage(
+	context context.Context,
+	payload any,
+	header Header,
+) *Message {
+	return &Message{
+		payload: payload,
+		header:  header,
+		context: context,
 	}
-
-	var customHeaders string
-	if len(chs) > 2 {
-		customHeaders = string(chs)
-	}
-
-	return map[string]string{
-		"origin":        m.Origin,
-		"route":         m.Route,
-		"type":          m.MessageType.String(),
-		"timestamp":     m.Timestamp.Format("2006-01-02 15:04:05"),
-		"replyChannel":  m.ReplyChannelName,
-		"customHeaders": customHeaders,
-		"correlationId": m.CorrelationId,
-		"channelName":   m.ChannelName,
-		"messageId":     m.MessageId,
-		"version":       m.Version,
-	}, nil
 }
 
 // GetPayload returns the payload of the message.
@@ -225,9 +213,9 @@ func (m *Message) GetPayload() any {
 // GetHeaders returns the headers of the message.
 //
 // Returns:
-//   - *messageHeaders: the message headers
-func (m *Message) GetHeaders() *messageHeaders {
-	return m.headers
+//   - Header: The message headers
+func (m *Message) GetHeader() Header {
+	return m.header
 }
 
 // SetContext sets the context for the message.
@@ -253,21 +241,38 @@ func (m *Message) GetContext() context.Context {
 // Returns:
 //   - bool: true if the message requires a reply, false otherwise
 func (m *Message) ReplyRequired() bool {
-	return m.headers.MessageType == Command || m.headers.MessageType == Query
+	return m.header[HeaderMessageType] == Command.String() ||
+		m.header[HeaderMessageType] == Query.String()
 }
 
-// SetRawMessage sets the raw message.
+// SetRawMessage sets the raw message from the external source.
 //
 // Parameters:
-//   - rawMessage: the raw message
+//   - rawMessage: The raw message to store
 func (m *Message) SetRawMessage(rawMessage any) {
 	m.rawMessage = rawMessage
 }
 
-// GetRawMessage returns the raw message.
+// GetRawMessage returns the raw message from the external source.
 //
 // Returns:
-//   - any: the raw message
+//   - any: The raw message
 func (m *Message) GetRawMessage() any {
 	return m.rawMessage
+}
+
+// SetInternalReplyChannel sets the internal reply channel for the message.
+//
+// Parameters:
+//   - channel: The publisher channel for replies
+func (m *Message) SetInternalReplyChannel(channel PublisherChannel) {
+	m.internalreplyChannel = channel
+}
+
+// GetInternalReplyChannel returns the internal reply channel for the message.
+//
+// Returns:
+//   - PublisherChannel: The publisher channel for replies
+func (m *Message) GetInternalReplyChannel() PublisherChannel {
+	return m.internalreplyChannel
 }

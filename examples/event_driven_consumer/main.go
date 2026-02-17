@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/jeffersonbrasilino/gomes"
 	kafka "github.com/jeffersonbrasilino/gomes/channel/kafka"
+	"github.com/jeffersonbrasilino/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/otel"
 )
 
 // Underneath the hood,
@@ -36,7 +36,10 @@ func (c *Command) Name() string {
 }
 
 // CQRS acton handler
-type CommandHandler struct{}
+type CommandHandler struct {
+	tracer otel.OtelTrace
+	header map[string]string
+}
 
 // response structure
 type ResultCm struct {
@@ -44,66 +47,88 @@ type ResultCm struct {
 }
 
 func NewComandHandler() *CommandHandler {
-	return &CommandHandler{}
+	return &CommandHandler{
+		tracer: otel.InitTrace("command-handler"),
+	}
 }
 
 // note that the link between the action and its handler is the type of the data parameter.
 // This indicates that this handler is responsible for this action
 func (c *CommandHandler) Handle(ctx context.Context, data *Command) (*ResultCm, error) {
-	fmt.Println("process command ok")
-	time.Sleep(time.Second * 2)
-	return &ResultCm{"deu tudo certo"}, nil
+	time.Sleep(time.Second * 1)
+	ctx, span := c.tracer.Start(
+		ctx,
+		"Handle Command",
+	)
+	defer span.End()
+
+	slog.Info("processing command...",
+		"username", data.Username,
+	)
+	time.Sleep(time.Second * 5)
+	slog.Info("command processed.",
+		"username", data.Username,
+	)
+
+	return &ResultCm{Result: "DEU BOM"}, nil
+	//return nil, fmt.Errorf("DEU RUIM AO PROCESSAR A MENSAGEM")
+}
+
+//when async handler and header is required for the processing.
+//Gomes message core inject the header using this method (satifying the MessageHeaderAccessor contract) before handle message.
+func (c *CommandHandler) SetMessageHeader(header message.Header) {
+	c.header = header
 }
 
 func main() {
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
 	slog.Info("start message system consumer....")
 
-	//create kafka connection
-	//The connection can, and is even recommended,
-	//be registered only once after registration.
-	//To use it in your channels, simply use its name in the channel reference name.
+	//connection channels
 	gomes.AddChannelConnection(
 		kafka.NewConnection("defaultConKafka", []string{"kafka:9092"}),
 	)
 
-	//create DLQ publisher channel
-	publisherDlqChannel := kafka.NewPublisherChannelAdapterBuilder(
-		"defaultConKafka",
-		"gomes.dlq",
-	)
-
-	//create publisher channel
-	publisherChannel := kafka.NewPublisherChannelAdapterBuilder(
-		"defaultConKafka",
-		"gomes.topic",
-	)
-
-	//create consumer channel on message system
-	//For the consumer channel,
-	//there are two resilience approaches: the retry pattern and the dead-letter pattern.
-	//You can use both together or opt for just one of the options.
+	// consumer channel config 
 	topicConsumerChannel := kafka.NewConsumerChannelAdapterBuilder(
 		"defaultConKafka",
 		"gomes.topic",
 		"test_consumer",
 	)
-	topicConsumerChannel.WithRetryTimes(2_000, 3_000)
-	topicConsumerChannel.WithDeadLetterChannelName("gomes.dlq")
 
-	//register publisher channel on message system
-	gomes.AddPublisherChannel(publisherChannel)
+	//configure reply channel using the replyTo header of the message. This way, we can have dynamic reply channels.
+	//topicConsumerChannel.WithSendReplyUsingReplyTo()
+	
+	//configure retries
+	//topicConsumerChannel.WithRetryTimes(2_000, 5_000)
 
-	//register dlq channel on message system
-	gomes.AddPublisherChannel(publisherDlqChannel)
+	//configure dlq channel name. This way, we can have a default dlq channel for all consumer channels that don't have a specific dlq channel configured.
+	//topicConsumerChannel.WithDeadLetterChannelName("gomes.dlq")
 
-	//register consumer channel on message system
+	//add consumer channel to the system
 	gomes.AddConsumerChannel(topicConsumerChannel)
+
+	//response channel configuration. This channel will be used to send the response of the message processing.
+	/* responseChannel := kafka.NewPublisherChannelAdapterBuilder(
+		"defaultConKafka",
+		"gomes.response",
+	)
+	gomes.AddPublisherChannel(responseChannel)
+
+	//DLQ channel configuration.
+	dlqChannel := kafka.NewPublisherChannelAdapterBuilder(
+		"defaultConKafka",
+		"gomes.dlq",
+	)
+	gomes.AddPublisherChannel(dlqChannel) */
 
 	// Register CQRS action and action handler.
 	gomes.AddActionHandler(NewComandHandler())
+
+	//enable otel trace for the message system
+	//gomes.EnableOtelTrace()
 
 	//start the message system
 	gomes.Start()
@@ -119,28 +144,30 @@ func main() {
 		panic(err)
 	}
 
-	//Run the event-driven consumer. Note that we have a few settings:
-	//- WithMessageProcessingTimeout: Sets the message processing timeout
-	//- WithAmountOfProcessors: Sets the number of parallel processing nodes
-	//- WithStopOnError: If a processing error occurs, the consumer is shut down (default is true)
-	go consumer.WithAmountOfProcessors(1).
-		WithMessageProcessingTimeout(50000).
-		WithStopOnError(false).
-		Run(ctx)
+	go func() {
+		err := consumer.WithAmountOfProcessors(1).
+			WithMessageProcessingTimeout(4000).
+			WithStopOnError(false).
+			Run(ctx)
+
+		fmt.Println("main.go erro no consumer", "erro", err)
+
+		if err != nil {
+			stop()
+		}
+	}()
 
 	<-ctx.Done()
 	//message system graceful shutdown
 	gomes.Shutdown()
+	fmt.Println("CONSUMIDOR STOPPED COM SUCESSO...")
 }
 
 func publishMessage() {
-	maxPublishMessages := 5
+	maxPublishMessages := 10
 	for i := 1; i <= maxPublishMessages; i++ {
 		fmt.Println("publish command message...")
-		//get command bus
-		//the message type is defined by bus(command/query/event)
 		busA, _ := gomes.CommandBusByChannel("gomes.topic")
-		busA.SendAsync(context.Background(), CreateCommand("teste", "123"))
-		time.Sleep(time.Second * 3)
+		busA.SendAsync(context.Background(), CreateCommand(fmt.Sprintf("message %d", i), "123"))
 	}
 }

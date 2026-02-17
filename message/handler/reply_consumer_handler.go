@@ -16,19 +16,24 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jeffersonbrasilino/gomes/container"
 	"github.com/jeffersonbrasilino/gomes/message"
 )
 
 // replyConsumerHandler processes reply messages by receiving them from consumer
 // channels and handling the response appropriately.
-type replyConsumerHandler struct{}
+type replyConsumerHandler struct {
+	gomesContainer container.Container[any, any]
+}
 
 // NewReplyConsumerHandler creates a new reply consumer handler instance.
 //
 // Returns:
 //   - *replyConsumerHandler: configured reply consumer handler
-func NewReplyConsumerHandler() *replyConsumerHandler {
-	return &replyConsumerHandler{}
+func NewReplyConsumerHandler(container container.Container[any, any]) *replyConsumerHandler {
+	return &replyConsumerHandler{
+		gomesContainer: container,
+	}
 }
 
 // Handle processes reply messages by receiving them from the configured reply
@@ -46,7 +51,7 @@ func (s *replyConsumerHandler) Handle(
 	msg *message.Message,
 ) (*message.Message, error) {
 
-	channel := msg.GetHeaders().ReplyChannel
+	channel := msg.GetInternalReplyChannel()
 	if channel == nil {
 		return nil, fmt.Errorf("reply channel not found")
 	}

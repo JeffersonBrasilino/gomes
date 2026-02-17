@@ -30,74 +30,66 @@ func TestMessageTypeString(t *testing.T) {
 	}
 }
 
-func TestNewMessageHeaders(t *testing.T) {
-	t.Parallel()
-	headers := message.NewMessageHeaders("test", "abc123", "route", message.Command, nil, "cid", "ch", "rch", time.Now(), "1.0")
-	if headers.Route != "route" {
-		t.Error("Route not set correctly")
-	}
-	if headers.MessageType != message.Command {
-		t.Error("MessageType not set correctly")
-	}
-	if headers.CorrelationId != "cid" {
-		t.Error("CorrelationId not set correctly")
-	}
-	if headers.ChannelName != "ch" {
-		t.Error("ChannelName not set correctly")
-	}
-	if headers.ReplyChannelName != "rch" {
-		t.Error("ReplyChannelName not set correctly")
-	}
-	if headers.CustomHeaders == nil {
-		t.Error("CustomHeaders should be initialized")
-	}
-}
+func TestMessageHeaders(t *testing.T) {
+	t.Run("should create success", func(t *testing.T) {
+		t.Parallel()
+		timestamp := time.Now().Format("2006-01-02 15:04:05")
+		data := map[string]string{
+			message.HeaderOrigin:        "dummy",
+			message.HeaderMessageId:     "dummy",
+			message.HeaderRoute:         "dummy",
+			message.HeaderMessageType:   message.Command.String(),
+			message.HeaderReplyTo:       "dummy",
+			message.HeaderCorrelationId: "dummy",
+			message.HeaderChannelName:   "dummy",
+			message.HeaderTimestamp:     timestamp,
+			message.HeaderVersion:       "dummy",
+		}
+		header := message.NewHeader(data)
+		for key, val := range data {
+			if header.Get(key) != val {
+				t.Errorf("Expected %s '%s', got '%s'", key, val, header.Get(key))
+			}
+		}
+	})
 
-func TestMessageHeaders_SetCustomHeaders(t *testing.T) {
-	t.Parallel()
-	headers := message.NewMessageHeaders("test", "abc123", "route", message.Command, nil, "cid", "ch", "rch", time.Now(), "1.0")
-	headers.SetCustomHeaders(message.CustomHeaders{"foo": "bar"})
-	if headers.CustomHeaders["foo"] != "bar" {
-		t.Error("CustomHeaders not set correctly")
-	}
-}
+	t.Run("return get data", func(t *testing.T) {
+		t.Parallel()
+		header := message.NewHeader(nil)
+		if header.Get(message.HeaderReplyTo) != "" {
+			t.Errorf("Expected empty data got '%s'", header.Get(message.HeaderReplyTo))
+		}
+	})
 
-func TestCustomMessageHeaders_ToMap(t *testing.T) {
-	t.Parallel()
-	headers := message.NewMessageHeaders("test", "abc123", "route", message.Command, nil, "cid", "ch", "rch", time.Now(), "1.0")
-	headers.SetCustomHeaders(message.CustomHeaders{"foo": "bar"})
-	_, err := headers.ToMap()
-	if err != nil {
-		t.Error("MarshalJSON should not return error")
-	}
-}
+	t.Run("return set data success", func(t *testing.T) {
+		t.Parallel()
+		header := message.NewHeader(nil)
+		header.Set("newHeader", "okok")
+		if header.Get("newHeader") != "okok" {
+			t.Errorf("Expected empty data got '%s'", header.Get(message.HeaderReplyTo))
+		}
+	})
 
-func TestCustomMessageHeaders_OptionalParams(t *testing.T) {
-	t.Parallel()
-	headers := message.NewMessageHeaders("", "", "route", message.Command, nil, "cid", "ch", "rch", time.Now().AddDate(0, 0, 0), "1.0")
-	msg := message.NewMessage("payload", headers, nil)
-	if msg.GetHeaders().MessageId == "" {
-		t.Error("MessageId did not empty")
-	}
-	if msg.GetHeaders().Timestamp.IsZero() {
-		t.Error("Timestamp did not empty")
-	}
-
-	if msg.GetHeaders().Origin == "" {
-		t.Error("Origin did not empty")
-	}
+	t.Run("return set data error", func(t *testing.T) {
+		t.Parallel()
+		header := message.NewHeader(nil)
+		err := header.Set(message.HeaderMessageId, "okok")
+		if err == nil {
+			t.Errorf("Expected error")
+		}
+	})
 }
 
 func TestNewMessage(t *testing.T) {
 	t.Parallel()
-	headers := message.NewMessageHeaders("test", "abc123", "route", message.Command, nil, "cid", "ch", "rch", time.Now(), "1.0")
+	headers := message.NewHeader(nil)
 	ctx := context.Background()
-	msg := message.NewMessage("payload", headers, ctx)
+	msg := message.NewMessage(ctx, "payload", headers)
 	if msg.GetPayload() != "payload" {
 		t.Error("GetPayload did not return correct value")
 	}
-	if msg.GetHeaders() != headers {
-		t.Error("GetHeaders did not return correct value")
+	if msg.GetHeader() == nil {
+		t.Error("GetHeader did not return correct value")
 	}
 	if msg.GetContext() != ctx {
 		t.Error("GetContext did not return correct value")
@@ -106,8 +98,8 @@ func TestNewMessage(t *testing.T) {
 
 func TestMessage_SetContext(t *testing.T) {
 	t.Parallel()
-	headers := message.NewMessageHeaders("test", "abc123", "route", message.Command, nil, "cid", "ch", "rch", time.Now(), "1.0")
-	msg := message.NewMessage("payload", headers, nil)
+	headers := message.NewHeader(nil)
+	msg := message.NewMessage(nil, "payload", headers)
 	ctx := context.Background()
 	msg.SetContext(ctx)
 	if msg.GetContext() != ctx {
@@ -116,9 +108,9 @@ func TestMessage_SetContext(t *testing.T) {
 }
 
 func TestMessage_Getters(t *testing.T) {
-	headers := message.NewMessageHeaders("test", "abc123", "route", message.Command, nil, "cid", "ch", "rch", time.Now(), "1.0")
+	headers := message.NewHeader(nil)
 	ctx := context.Background()
-	msg := message.NewMessage("payload", headers, ctx)
+	msg := message.NewMessage(ctx, "payload", headers)
 	cases := []struct {
 		description string
 		should      func() any
@@ -127,9 +119,6 @@ func TestMessage_Getters(t *testing.T) {
 		{"GetPayload should return correct value", func() any {
 			return msg.GetPayload()
 		}, "payload"},
-		{"GetHeaders should return correct value", func() any {
-			return msg.GetHeaders()
-		}, headers},
 		{"GetContext should return correct value", func() any {
 			return msg.GetContext()
 		}, ctx},
@@ -159,8 +148,10 @@ func TestMessage_ReplyRequired(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.description, func(t *testing.T) {
 			t.Parallel()
-			headers := message.NewMessageHeaders("test", "abc1234", "route", c.should, nil, "cid", "ch", "rch", time.Now(), "1.0")
-			msg := message.NewMessage("payload", headers, nil)
+			headers := message.NewHeader(map[string]string{
+				message.HeaderMessageType: c.should.String(),
+			})
+			msg := message.NewMessage(nil, "payload", headers)
 			if msg.ReplyRequired() != c.want {
 				t.Errorf("%q: got %v, want %v", c.description, msg.ReplyRequired(), c.want)
 			}

@@ -45,10 +45,11 @@ type EventDrivenConsumer struct {
 	processingQueue               chan *message.Message
 	processorsWaitGroup           sync.WaitGroup
 	stopOnError                   bool
-	RunCtx                        context.Context
-	cancelRunCtx                  context.CancelFunc
-	isRunning                     bool
 	otelTrace                     otel.OtelTrace
+	stopTrigger                   chan error
+	runCancelCtxFunc              func(err error)
+	once                          sync.Once
+	mu                            sync.Mutex
 }
 
 // NewEventDrivenConsumerBuilder creates a new EventDrivenConsumerBuilder instance.
@@ -85,7 +86,6 @@ func NewEventDrivenConsumer(
 		inboundChannelAdapter:         inboundChannelAdapter,
 		amountOfProcessors:            1,
 		stopOnError:                   true,
-		isRunning:                     true,
 		otelTrace:                     otel.InitTrace("event-driven-consumer"),
 	}
 	return consumer
@@ -105,22 +105,20 @@ func (b *EventDrivenConsumerBuilder) Build(
 
 	anyChannel, err := container.Get(b.referenceName)
 	if err != nil {
-		panic(
-			fmt.Sprintf(
+		return nil,
+			fmt.Errorf(
 				"[event-driven-consumer] consumer channel %s not found.",
 				b.referenceName,
-			),
-		)
+			)
 	}
 
 	inboundChannel, ok := anyChannel.(InboundChannelAdapter)
 	if !ok {
-		panic(
-			fmt.Sprintf(
+		return nil,
+			fmt.Errorf(
 				"[event-driven-consumer] consumer channel %s is not a consumer channel.",
 				b.referenceName,
-			),
-		)
+			)
 	}
 
 	gatewayBuilder := NewGatewayBuilder(inboundChannel.ReferenceName(), "")
@@ -143,6 +141,10 @@ func (b *EventDrivenConsumerBuilder) Build(
 
 	if ackChannel, ok := inboundChannel.(handler.ChannelMessageAcknowledgment); ok {
 		gatewayBuilder.WithAcknowledge(ackChannel)
+	}
+
+	if inboundChannel.SendReplyUsingReplyTo() == true {
+		gatewayBuilder.WithSendReplyUsingReplyTo()
 	}
 
 	gateway, err := gatewayBuilder.Build(container)
@@ -180,7 +182,8 @@ func (b *EventDrivenConsumer) WithMessageProcessingTimeout(
 // default value: 1
 //
 // Warning: If the order of message processing is crucial (such as data streaming),
-// it is not recommended to configure this setting, as we do not guarantee the processing order in parallel goroutines.
+// it is not recommended to configure this setting, as we do not guarantee the
+// processing order in parallel goroutines.
 //
 // Parameters:
 //   - value: number of processors
@@ -215,53 +218,46 @@ func (b *EventDrivenConsumer) WithStopOnError(value bool) *EventDrivenConsumer {
 //
 // Returns:
 //   - error: error if any occurs
-func (e *EventDrivenConsumer) Run(ctx context.Context) {
+func (e *EventDrivenConsumer) Run(ctx context.Context) error {
 	slog.Info(
 		"[event-driven-consumer] started.",
 		"consumerName", e.referenceName,
 	)
 
-	e.RunCtx, e.cancelRunCtx = context.WithCancel(ctx)
+	runCtx, cancelRunCtx := context.WithCancelCause(ctx)
 	defer e.shutdown()
-	defer e.cancelRunCtx()
+	e.runCancelCtxFunc = cancelRunCtx
 
 	e.processingQueue = make(chan *message.Message, e.amountOfProcessors)
-	e.startProcessorsNodes()
+	e.stopTrigger = make(chan error)
+	e.startProcessorsNodes(runCtx)
 
 	for {
-		beforeReceiveContextIsDone, consumerCtxErr := e.handleContext(e.RunCtx)
-		if consumerCtxErr != nil {
-			slog.Error("[event-driven-consumer] run error",
-				"consumerName", e.referenceName,
-				"error", consumerCtxErr,
-			)
-			if e.stopOnError {
-				return
-			}
+		select {
+		case <-runCtx.Done():
+			return context.Cause(runCtx)
+		default:
 		}
 
-		if beforeReceiveContextIsDone {
-			return
-		}
-
-		msg, err := e.inboundChannelAdapter.ReceiveMessage(e.RunCtx)
+		msg, err := e.inboundChannelAdapter.ReceiveMessage(runCtx)
 		if err != nil {
 			if err != context.Canceled {
 				slog.Error("[event-driven-consumer] message receive error",
-					"consumerName", e.referenceName,
+					"consumer.name", e.referenceName,
 					"error", err,
 				)
 			}
 			if e.stopOnError {
-				return
+				e.stop(err)
+				return err
 			}
 		}
-		afterReceiveContextIsDone, _ := e.handleContext(e.RunCtx)
-		if afterReceiveContextIsDone {
-			return
-		}
 
-		e.processingQueue <- msg
+		select {
+		case err := <-e.stopTrigger:
+			return err
+		case e.processingQueue <- msg:
+		}
 	}
 }
 
@@ -271,27 +267,29 @@ func (e *EventDrivenConsumer) Run(ctx context.Context) {
 //   - msg: message to be processed
 //   - nodeId: processor identifier
 func (e *EventDrivenConsumer) sendToGateway(
+	ctx context.Context,
 	msg *message.Message,
 	nodeId int,
 ) {
-
-	contextRunHasDone, _ := e.handleContext(e.RunCtx)
-	if contextRunHasDone {
+	select {
+	case <-ctx.Done():
 		return
+	default:
 	}
 
 	opCtx, cancel := context.WithTimeout(
-		e.RunCtx,
+		ctx,
 		time.Duration(e.processingTimeoutMilliseconds)*time.Millisecond,
 	)
 	defer cancel()
 
+	header := msg.GetHeader()
+
 	var span otel.OtelSpan
 	if msg.GetContext() != nil {
-
 		opCtx, span = e.otelTrace.Start(
 			msg.GetContext(),
-			fmt.Sprintf("Receive message %s", msg.GetHeaders().Route),
+			fmt.Sprintf("Receive message %s", header.Get(message.HeaderRoute)),
 			otel.WithMessagingSystemType(otel.MessageSystemTypeInternal),
 			otel.WithSpanOperation(otel.SpanOperationReceive),
 			otel.WithSpanKind(otel.SpanKindConsumer),
@@ -303,7 +301,7 @@ func (e *EventDrivenConsumer) sendToGateway(
 	slog.Info("[event-driven-consumer] message processing started.",
 		"consumer.name", e.referenceName,
 		"consumer.nodeId", nodeId,
-		"consumer.messageId", msg.GetHeaders().MessageId,
+		"consumer.messageId", header.Get(message.HeaderMessageId),
 	)
 	_, err := e.gateway.Execute(opCtx, msg)
 	spanStatus := otel.SpanStatusOK
@@ -312,75 +310,81 @@ func (e *EventDrivenConsumer) sendToGateway(
 		slog.Error("[event-driven-consumer] processing message error.",
 			"consumer.name", e.referenceName,
 			"consumer.nodeId", nodeId,
-			"consumer.messageId", msg.GetHeaders().MessageId,
+			"consumer.messageId", header.Get(message.HeaderMessageId),
 			"consumer.error", err.Error(),
 		)
 
-		if e.otelTrace != nil {
+		if span != nil {
 			span.Error(err, "[event-driven-consumer] processing message error.")
 		}
 
 		if e.stopOnError {
-			e.cancelRunCtx()
+			e.stop(err)
 			return
 		}
 	}
 
-	if e.otelTrace != nil {
+	if span != nil {
 		span.SetStatus(spanStatus, "[event-driven-consumer] message processed completed.")
 	}
 
 	slog.Info("[event-driven-consumer] message processed completed.",
 		"consumer.name", e.referenceName,
 		"consumer.nodeId", nodeId,
-		"consumer.messageId", msg.GetHeaders().MessageId,
+		"consumer.messageId", header.Get(message.HeaderMessageId),
 	)
-}
-
-func (e *EventDrivenConsumer) handleContext(ctx context.Context) (bool, error) {
-	select {
-	case <-ctx.Done():
-		if ctx.Err() != nil {
-			return true, ctx.Err()
-		}
-		return true, nil
-	default:
-	}
-	return false, nil
 }
 
 // Stop requests the consumer to stop by canceling the internal context.
 func (e *EventDrivenConsumer) Stop() {
-	e.cancelRunCtx()
+	e.stop(nil)
+}
+
+func (e *EventDrivenConsumer) stop(err error) {
+	e.once.Do(func() {
+		if e.runCancelCtxFunc != nil {
+			e.runCancelCtxFunc(err)
+		}
+		select {
+		case e.stopTrigger <- err:
+		default:
+		}
+	})
 }
 
 // shutdown ends processing, closes the input channel and waits for processors to finish.
 func (e *EventDrivenConsumer) shutdown() {
 
-	if !e.isRunning {
-		return
-	}
-	e.isRunning = false
 	slog.Info("[event-driven-consumer] shutting down.",
 		"consumerName", e.referenceName,
 	)
+
 	e.inboundChannelAdapter.Close()
 	close(e.processingQueue)
 	e.processorsWaitGroup.Wait()
+	e.once.Do(func() {
+		close(e.stopTrigger)
+	})
 }
 
 // startProcessorsNodes starts concurrent processors to consume messages from the queue.
-func (e *EventDrivenConsumer) startProcessorsNodes() {
+func (e *EventDrivenConsumer) startProcessorsNodes(ctx context.Context) {
 	for i := 0; i < e.amountOfProcessors; i++ {
 		e.processorsWaitGroup.Add(1)
 		go func(workerId int) {
 			defer e.processorsWaitGroup.Done()
-			for {
-				msg := <-e.processingQueue
+			for msg := range e.processingQueue {
+
 				if msg != nil {
-					e.sendToGateway(msg, workerId)
+					e.sendToGateway(ctx, msg, workerId)
 				}
 			}
+
+			slog.Debug("[event-driven-consumer] processor stopping",
+				"consumer.name", e.referenceName,
+				"consumer.nodeId", workerId,
+				"reason", "queue closed",
+			)
 		}(i)
 	}
 }

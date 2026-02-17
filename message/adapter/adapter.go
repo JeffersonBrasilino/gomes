@@ -10,7 +10,7 @@ type ChannelConnection interface {
 	Disconnect() error
 }
 
-type ClosableChannel interface{
+type ClosableChannel interface {
 	Close() error
 }
 

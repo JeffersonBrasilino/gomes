@@ -1,6 +1,7 @@
-// Package otel provides implementation for OpenTelemetry tracing functionality,
-// offering a simplified interface for creating and managing traces in distributed systems.
-
+// Package otel provides an implementation for OpenTelemetry tracing
+// functionality. Intent: present a lightweight API to create and manage
+// traces and spans across message and HTTP flows. Objective: simplify span
+// creation, status reporting and propagation for the application.
 package otel
 
 import (
@@ -14,7 +15,8 @@ import (
 	traceTypes "go.opentelemetry.io/otel/trace"
 )
 
-// SpanStatus represents the status of a span, indicating whether the operation was successful or not.
+// SpanStatus represents the status of a span, indicating whether the operation
+// was successful or not.
 type (
 	SpanStatus        int
 	SpanKind          int
@@ -88,7 +90,7 @@ var (
 	}
 )
 
-// enable tracing
+// EnableTrace enables tracing for the message system.
 func EnableTrace() {
 	traceEnabled = true
 }
@@ -131,37 +133,51 @@ func InitTrace(serviceName string) *otelTrace {
 	}
 }
 
+// WithMessagingSystemType returns a StartOptions that sets the messaging
+// system type on the span start options.
 func WithMessagingSystemType(mt MessageSystemType) StartOptions {
 	return func(so *startOptions) {
 		so.messagingSystemType = mt
 	}
 }
 
-// só deve ser setado para spans de mensageria, http não faz sentido
+// WithSpanOperation returns a StartOptions that sets the span operation
+// type. This option is intended for messaging spans and typically does not
+// apply to HTTP spans.
 func WithSpanOperation(operation SpanOperation) StartOptions {
 	return func(so *startOptions) {
 		so.operation = operation
 	}
 }
 
+// WithSpanKind returns a StartOptions that sets the span kind (server,
+// client, producer, consumer, internal).
 func WithSpanKind(kind SpanKind) StartOptions {
 	return func(so *startOptions) {
 		so.spanKind = kind
 	}
 }
 
+// WithTraceContextToLink returns a StartOptions that links an existing trace
+// context to the newly created span, creating an explicit link between
+// spans.
 func WithTraceContextToLink(ctx context.Context) StartOptions {
 	return func(so *startOptions) {
 		so.traceContextToLink = ctx
 	}
 }
 
+// WithAttributes returns a StartOptions that appends OtelAttribute values to
+// the span start options.
 func WithAttributes(attributes ...OtelAttribute) StartOptions {
 	return func(so *startOptions) {
 		so.attributes = attributes
 	}
 }
 
+// WithMessage returns a StartOptions that sets the message associated with
+// the span. When provided, the message headers are used to populate common
+// messaging attributes.
 func WithMessage(message *message.Message) StartOptions {
 	return func(so *startOptions) {
 		so.message = message
@@ -210,7 +226,10 @@ func (t *otelTrace) Start(
 			makeAttributesFromMessage(startOptions.message)...,
 		)
 		if name == "" {
-			spanName = makeSpanName(startOptions.spanKind, startOptions.message.GetHeaders().Route)
+			spanName = makeSpanName(
+				startOptions.spanKind,
+				startOptions.message.GetHeader().Get(message.HeaderRoute),
+			)
 		}
 	}
 
@@ -258,7 +277,7 @@ func (t *otelTrace) Start(
 //
 //	defer span.End()
 func (s *otelSpan) End() {
-	if s.span == nil{
+	if s.span == nil {
 		return
 	}
 	s.span.End()
@@ -274,7 +293,7 @@ func (s *otelSpan) End() {
 //
 //	span.AddEvent("user-validated", otel.NewOtelAttr("valid", "true"))
 func (s *otelSpan) AddEvent(eventMessage string, attributes ...OtelAttribute) {
-	if s.span == nil{
+	if s.span == nil {
 		return
 	}
 	s.span.AddEvent(eventMessage, makeAttributes(attributes))
@@ -290,7 +309,7 @@ func (s *otelSpan) AddEvent(eventMessage string, attributes ...OtelAttribute) {
 //
 //	span.SetStatus(SpanStatusOK, "operation completed successfully")
 func (s *otelSpan) SetStatus(status SpanStatus, description string) {
-	if s.span == nil{
+	if s.span == nil {
 		return
 	}
 	s.span.SetStatus(status.otelStatus(), description)
@@ -318,7 +337,7 @@ func (s *otelSpan) Success(message string) {
 //
 //	span.Error(err, "failed to process user data: invalid format")
 func (s *otelSpan) Error(err error, message string) {
-	if s.span == nil{
+	if s.span == nil {
 		return
 	}
 	s.SetStatus(SpanStatusError, message)

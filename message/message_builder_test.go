@@ -24,7 +24,7 @@ func TestNewMessageBuilderFromMessage(t *testing.T) {
 		WithMessageType(1).
 		WithCorrelationId("cid").
 		WithChannelName("ch").
-		WithReplyChannelName("rch").
+		WithReplyTo("rch").
 		WithContext(context.Background())
 	msg := b.Build()
 	b2 := message.NewMessageBuilderFromMessage(msg)
@@ -46,7 +46,7 @@ func TestWithMessageType(t *testing.T) {
 	t.Parallel()
 	data := message.Command
 	b := message.NewMessageBuilder().WithMessageType(data).Build()
-	if b.GetHeaders().MessageType != data {
+	if b.GetHeader().Get(message.HeaderMessageType) != data.String() {
 		t.Error("WithMessageType did not set messageType correctly")
 	}
 }
@@ -54,7 +54,7 @@ func TestWithMessageType(t *testing.T) {
 func TestWithRoute(t *testing.T) {
 	t.Parallel()
 	b := message.NewMessageBuilder().WithRoute("route").Build()
-	if b.GetHeaders().Route != "route" {
+	if b.GetHeader().Get(message.HeaderRoute) != "route" {
 		t.Error("WithRoute did not set route correctly")
 	}
 }
@@ -62,25 +62,16 @@ func TestWithRoute(t *testing.T) {
 func TestWithReplyChannel(t *testing.T) {
 	t.Parallel()
 	var ch message.PublisherChannel
-	b := message.NewMessageBuilder().WithReplyChannel(ch).Build()
-	if b.GetHeaders().ReplyChannel != ch {
+	b := message.NewMessageBuilder().WithInternalReplyChannel(ch).Build()
+	if b.GetInternalReplyChannel() != ch {
 		t.Error("WithReplyChannel did not set replyChannel correctly")
-	}
-}
-
-func TestWithCustomHeader(t *testing.T) {
-	t.Parallel()
-	h := message.CustomHeaders{"k": "v"}
-	b := message.NewMessageBuilder().WithCustomHeader(h).Build()
-	if b.GetHeaders().CustomHeaders["k"] != "v" {
-		t.Error("WithCustomHeader did not set customHeaders correctly")
 	}
 }
 
 func TestWithCorrelationId(t *testing.T) {
 	t.Parallel()
 	b := message.NewMessageBuilder().WithCorrelationId("cid")
-	if b.Build().GetHeaders().CorrelationId != "cid" {
+	if b.Build().GetHeader().Get(message.HeaderCorrelationId) != "cid" {
 		t.Error("WithCorrelationId did not set correlationId correctly")
 	}
 }
@@ -88,15 +79,15 @@ func TestWithCorrelationId(t *testing.T) {
 func TestWithChannelName(t *testing.T) {
 	t.Parallel()
 	b := message.NewMessageBuilder().WithChannelName("ch")
-	if b.Build().GetHeaders().ChannelName != "ch" {
+	if b.Build().GetHeader().Get(message.HeaderChannelName) != "ch" {
 		t.Error("WithChannelName did not set channelName correctly")
 	}
 }
 
 func TestWithReplyChannelName(t *testing.T) {
 	t.Parallel()
-	b := message.NewMessageBuilder().WithReplyChannelName("rch")
-	if b.Build().GetHeaders().ReplyChannelName != "rch" {
+	b := message.NewMessageBuilder().WithReplyTo("rch")
+	if b.Build().GetHeader().Get(message.HeaderReplyTo) != "rch" {
 		t.Error("WithReplyChannelName did not set replyChannelName correctly")
 	}
 }
@@ -110,19 +101,11 @@ func TestWithContext(t *testing.T) {
 	}
 }
 
-func TestWithMessageId(t *testing.T) {
-	t.Parallel()
-	b := message.NewMessageBuilder().WithMessageId("msgId").Build()
-	if b.GetHeaders().MessageId != "msgId" {
-		t.Error("WithMessageId did not set messageId correctly")
-	}
-}
-
 func TestWithTimestamp(t *testing.T) {
 	t.Parallel()
 	timestamp := time.Now()
 	b := message.NewMessageBuilder().WithTimestamp(timestamp).Build()
-	if b.GetHeaders().Timestamp != timestamp {
+	if b.GetHeader().Get(message.HeaderTimestamp) != timestamp.Format("2006-01-02 15:04:05") {
 		t.Error("WithTimestamp did not set timestamp correctly")
 	}
 }
@@ -130,7 +113,7 @@ func TestWithTimestamp(t *testing.T) {
 func TestWithOrigin(t *testing.T) {
 	t.Parallel()
 	b := message.NewMessageBuilder().WithOrigin("origin").Build()
-	if b.GetHeaders().Origin != "origin" {
+	if b.GetHeader().Get(message.HeaderOrigin) != "origin" {
 		t.Error("WithOrigin did not set origin correctly")
 	}
 }
@@ -138,7 +121,7 @@ func TestWithOrigin(t *testing.T) {
 func TestWithVersion(t *testing.T) {
 	t.Parallel()
 	b := message.NewMessageBuilder().WithVersion("version").Build()
-	if b.GetHeaders().Version != "version" {
+	if b.GetHeader().Get(message.HeaderVersion) != "version" {
 		t.Error("WithVersion did not set version correctly")
 	}
 }
@@ -160,7 +143,7 @@ func TestBuild(t *testing.T) {
 		WithMessageType(1).
 		WithCorrelationId("cid").
 		WithChannelName("ch").
-		WithReplyChannelName("rch").
+		WithReplyTo("rch").
 		WithContext(context.Background())
 	msg := b.Build()
 	if msg == nil {
