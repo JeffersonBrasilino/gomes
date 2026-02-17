@@ -35,7 +35,6 @@ O **gomes** é um plugin robusto e flexível para sistemas de mensagens em arqui
 - **Dead Letter Channel**: Gerenciamento de mensagens que falharam no processamento
 - **Message Dispatcher**: Distribuição de mensagens para handlers apropriados
 - **Event-Driven Consumer**: Consumo assíncrono com processamento paralelo
-- **Polling Consumer**: Consumo periódico para processamento em lote
 
 ### Estrutura de Pastas do Plugin
 
@@ -67,7 +66,6 @@ pkg/core/infrastructure/gomes/
 │   │   └── adapter/        # Adaptadores de canal
 │   ├── endpoint/           # Endpoints de processamento
 │   │   ├── event_driven_consumer.go  # Consumer event-driven
-│   │   ├── polling_consumer.go       # Consumer polling
 │   │   ├── gateway.go                # Gateway de processamento
 │   │   ├── message_dispatcher.go     # Dispatcher de mensagens
 │   │   └── interfaces.go             # Interfaces dos endpoints
@@ -990,86 +988,6 @@ func main() {
 - **`WithMessageProcessingTimeout(timeout)`**: Define timeout para processamento
 - **`WithStopOnError(stop)`**: Define se deve parar em caso de erro
 - **`Run(ctx)`**: Inicia o processamento assíncrono
-
-#### Polling Consumer
-
-O Polling Consumer processa mensagens de forma periódica, ideal para processamento em lote e sistemas que não precisam de tempo real.
-
-##### Características
-
-- **Processamento Periódico**: Verifica mensagens em intervalos definidos
-- **Processamento em Lote**: Ideal para operações que processam múltiplas mensagens
-- **Controle de Recursos**: Menor uso de recursos do sistema
-- **Maior Latência**: Processamento não é imediato
-
-##### Exemplo de Uso
-
-```go
-func main() {
-    // Configure consumer polling
-    consumer := gomes.NewPollingConsumer("batch-consumer")
-
-    // Configure parâmetros
-    consumer.WithPollIntervalMilliseconds(5000)      // Poll a cada 5 segundos
-    consumer.WithProcessingDelayMilliseconds(1000)  // Delay de 1 segundo entre processamentos
-    consumer.WithProcessingTimeoutMilliseconds(30000) // Timeout de 30 segundos
-    consumer.WithStopOnError(false)                  // Não parar em caso de erro
-
-    // Inicie o polling
-    go consumer.Run(ctx)
-}
-```
-
-##### Métodos do Polling Consumer
-
-- **`WithPollIntervalMilliseconds(interval)`**: Define intervalo de polling
-- **`WithProcessingDelayMilliseconds(delay)`**: Define delay entre processamentos
-- **`WithProcessingTimeoutMilliseconds(timeout)`**: Define timeout para processamento
-- **`WithStopOnError(stop)`**: Define se deve parar em caso de erro
-- **`Run(ctx)`**: Inicia o polling periódico
-
-#### Comparação: Event-Driven vs Polling
-
-| Aspecto             | Event-Driven          | Polling                      |
-| ------------------- | --------------------- | ---------------------------- |
-| **Latência**        | Baixa (tempo real)    | Alta (periódica)             |
-| **Throughput**      | Alto                  | Médio                        |
-| **Uso de Recursos** | Alto                  | Baixo                        |
-| **Complexidade**    | Média                 | Baixa                        |
-| **Escalabilidade**  | Excelente             | Boa                          |
-| **Casos de Uso**    | Tempo real, streaming | Batch processing, relatórios |
-
-##### Prós e Contras
-
-**Event-Driven Consumer:**
-
-✅ **Prós:**
-
-- Processamento em tempo real
-- Alta eficiência para streaming
-- Escalabilidade horizontal
-- Baixa latência
-
-❌ **Contras:**
-
-- Maior complexidade de configuração
-- Maior uso de recursos
-- Pode causar backpressure se não configurado adequadamente
-
-**Polling Consumer:**
-
-✅ **Prós:**
-
-- Simplicidade de implementação
-- Baixo uso de recursos
-- Controle preciso sobre quando processar
-- Ideal para batch processing
-
-❌ **Contras:**
-
-- Maior latência
-- Menor throughput
-- Pode perder mensagens se o intervalo for muito longo
 
 ### 🛡️ Resiliência
 
