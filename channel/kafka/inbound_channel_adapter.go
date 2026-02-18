@@ -406,35 +406,6 @@ func (b *consumerChannelAdapterBuilder) WithOffsetOutOfRangeError(
 	return b
 }
 
-// NewInboundChannelAdapter creates a new Kafka inbound channel adapter instance.
-//
-// Parameters:
-//   - consumer: the Kafka consumer for receiving messages
-//   - topic: the Kafka topic name
-//   - messageTranslator: translator for converting Kafka messages to internal format
-//
-// Returns:
-//   - *inboundChannelAdapter: configured inbound channel adapter
-func NewInboundChannelAdapter(
-	consumer *kafka.Reader,
-	topic string,
-	messageTranslator adapter.InboundChannelMessageTranslator[*kafka.Message],
-) *inboundChannelAdapter {
-	ctx, cancel := context.WithCancel(context.Background())
-	adp := &inboundChannelAdapter{
-		consumer:          consumer,
-		topic:             topic,
-		messageTranslator: messageTranslator,
-		messageChannel:    make(chan *message.Message),
-		errorChannel:      make(chan error),
-		ctx:               ctx,
-		cancelCtx:         cancel,
-		otelTrace:         otel.InitTrace("kafka-inbound-channel-adapter"),
-	}
-	go adp.subscribeOnTopic()
-	return adp
-}
-
 // Build constructs a Kafka inbound channel adapter from the dependency container.
 //
 // Parameters:
@@ -470,6 +441,36 @@ func (c *consumerChannelAdapterBuilder) Build(
 	consumer := kafka.NewReader(*c.kafkaConsumerConfig)
 	adapter := NewInboundChannelAdapter(consumer, c.ReferenceName(), c.MessageTranslator())
 	return c.InboundChannelAdapterBuilder.BuildInboundAdapter(adapter), nil
+}
+
+
+// NewInboundChannelAdapter creates a new Kafka inbound channel adapter instance.
+//
+// Parameters:
+//   - consumer: the Kafka consumer for receiving messages
+//   - topic: the Kafka topic name
+//   - messageTranslator: translator for converting Kafka messages to internal format
+//
+// Returns:
+//   - *inboundChannelAdapter: configured inbound channel adapter
+func NewInboundChannelAdapter(
+	consumer *kafka.Reader,
+	topic string,
+	messageTranslator adapter.InboundChannelMessageTranslator[*kafka.Message],
+) *inboundChannelAdapter {
+	ctx, cancel := context.WithCancel(context.Background())
+	adp := &inboundChannelAdapter{
+		consumer:          consumer,
+		topic:             topic,
+		messageTranslator: messageTranslator,
+		messageChannel:    make(chan *message.Message),
+		errorChannel:      make(chan error),
+		ctx:               ctx,
+		cancelCtx:         cancel,
+		otelTrace:         otel.InitTrace("kafka-inbound-channel-adapter"),
+	}
+	go adp.subscribeOnTopic()
+	return adp
 }
 
 // Name returns the topic name of the Kafka inbound channel adapter.

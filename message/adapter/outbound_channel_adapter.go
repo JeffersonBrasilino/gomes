@@ -133,10 +133,7 @@ func (b *OutboundChannelAdapterBuilder[TMessageType]) BuildOutboundAdapter(
 	outboundAdapter message.PublisherChannel,
 ) (*OutboundChannelAdapter, error) {
 
-	outboundHandler := NewOutboundChannelAdapter(outboundAdapter)
-	if b.replyChannelName != "" {
-		outboundHandler.replyChannelName = b.replyChannelName
-	}
+	outboundHandler := NewOutboundChannelAdapter(outboundAdapter, b.replyChannelName)
 	return outboundHandler, nil
 }
 
@@ -149,9 +146,11 @@ func (b *OutboundChannelAdapterBuilder[TMessageType]) BuildOutboundAdapter(
 //   - *OutboundChannelAdapter: Configured outbound channel adapter
 func NewOutboundChannelAdapter(
 	adapter message.PublisherChannel,
+	replyChannelName string,
 ) *OutboundChannelAdapter {
 	return &OutboundChannelAdapter{
-		outboundAdapter: adapter,
+		outboundAdapter:  adapter,
+		replyChannelName: replyChannelName,
 	}
 }
 

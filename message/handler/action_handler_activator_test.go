@@ -32,6 +32,9 @@ func (h *mockActionHandler) Handle(ctx context.Context, action *mockAction) (any
 	return h.result, nil
 }
 
+func (h *mockActionHandler) SetMessageHeader(msg message.Header) {
+}
+
 func TestNewActionHandleActivatorBuilder(t *testing.T) {
 	t.Parallel()
 	action := &mockActionHandler{result: "ok"}
@@ -65,6 +68,7 @@ func TestActionHandleActivator_Handle(t *testing.T) {
 		{"success", false, true, true},
 		{"failure", true, false, false},
 		{"invalid payload", true, false, false},
+		{"invalid json payload", true, false, false},
 	}
 	resChn := make(chan *message.Message, 50)
 	for _, c := range cases {
@@ -85,11 +89,16 @@ func TestActionHandleActivator_Handle(t *testing.T) {
 				WithChannelName("channel").
 				WithMessageType(message.Command).
 				WithPayload(&mockAction{name: "test"}).
+				WithReplyTo("replyMessage").
 				WithInternalReplyChannel(replyChan)
 
 			if c.description == "invalid payload" {
 				msg.WithPayload("teste")
 			}
+			if c.description == "invalid json payload" {
+				msg.WithPayload([]byte("{\"name\": \"Joe\", \"age\": null,}"))
+			}
+
 			ctx := context.Background()
 			result, err := activator.Handle(ctx, msg.Build())
 			if c.expectError && err == nil {

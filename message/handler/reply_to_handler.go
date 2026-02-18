@@ -103,7 +103,6 @@ func (s *SendReplyToHandler) Handle(
 
 	if err != nil {
 		rplMessage := message.NewMessageBuilder().
-			WithChannelName(msg.GetInternalReplyChannel().Name()).
 			WithMessageType(message.Document).
 			WithCorrelationId(
 				msg.GetHeader().Get(message.HeaderCorrelationId),

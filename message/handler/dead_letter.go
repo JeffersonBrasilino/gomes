@@ -24,9 +24,9 @@ import (
 // deadLetter implements the Dead Letter Channel pattern, routing failed messages
 // to a designated dead letter channel for further processing or analysis.
 type deadLetter struct {
-	channel message.PublisherChannel
-	handler message.MessageHandler
-	otelTrace         otel.OtelTrace
+	channel   message.PublisherChannel
+	handler   message.MessageHandler
+	otelTrace otel.OtelTrace
 }
 type deadLetterMessage struct {
 	ReasonError string
@@ -48,9 +48,9 @@ func NewDeadLetter(
 	handler message.MessageHandler,
 ) *deadLetter {
 	return &deadLetter{
-		channel: channel,
-		handler: handler,
-		otelTrace:         otel.InitTrace("dead-letter-handler"),
+		channel:   channel,
+		handler:   handler,
+		otelTrace: otel.InitTrace("dead-letter-handler"),
 	}
 }
 

@@ -34,6 +34,14 @@ func (m mockMessageHandler) Handle(ctx context.Context, msg *message.Message) (*
 	return msg, nil
 }
 
+type mockChannelCommitMessage struct {
+	*mockConsumerChannel
+}
+
+func (m *mockChannelCommitMessage) CommitMessage(msg *message.Message) error {
+	return nil
+}
+
 // mockTranslator implements InboundChannelMessageTranslator for tests.
 type mockTranslator struct{}
 
@@ -87,6 +95,28 @@ func TestInboundChannelAdapterBuilder_WithAfterInterceptors(t *testing.T) {
 	b := builder.BuildInboundAdapter(&mockConsumerChannel{})
 	if len(b.AfterProcessors()) != 1 {
 		t.Error("AfterProcessors not assigned correctly")
+	}
+}
+
+func TestInboundChannelAdapterBuilder_WithSendReplyUsingReplyTo(t *testing.T) {
+	t.Parallel()
+	translator := &mockTranslator{}
+	builder := adapter.NewInboundChannelAdapterBuilder("ref", "chan", translator)
+	builder.WithSendReplyUsingReplyTo()
+	b := builder.BuildInboundAdapter(&mockConsumerChannel{})
+	if b.SendReplyUsingReplyTo() != true {
+		t.Error("SendReplyUsingReplyTo not set correctly")
+	}
+}
+
+func TestInboundChannelAdapterBuilder_WithRetryTimes(t *testing.T) {
+	t.Parallel()
+	translator := &mockTranslator{}
+	builder := adapter.NewInboundChannelAdapterBuilder("ref", "chan", translator)
+	builder.WithRetryTimes(1_000)
+	b := builder.BuildInboundAdapter(&mockConsumerChannel{})
+	if b.RetryAttempts()[0] != 1_000 {
+		t.Error("RetryTimes not set correctly")
 	}
 }
 
@@ -179,6 +209,46 @@ func TestInboundChannelAdapter_ReceiveMessage(t *testing.T) {
 		}
 		if m != nil {
 			t.Error("Message should be nil when context is canceled")
+		}
+	})
+}
+
+func TestInboundChannelAdapter_SendReplyUsingReplyTo(t *testing.T) {
+	t.Parallel()
+	mockChan := &mockConsumerChannel{}
+	adapterInstance := adapter.NewInboundChannelAdapter(mockChan, "ref", "dlc", nil, nil, nil, true)
+	if adapterInstance.SendReplyUsingReplyTo() != true {
+		t.Error("SendReplyUsingReplyTo not set correctly")
+	}
+}
+
+func TestInboundChannelAdapter_RetryAttempts(t *testing.T) {
+	t.Parallel()
+	mockChan := &mockConsumerChannel{}
+	retryTimes := []int{1, 2, 3}
+	adapterInstance := adapter.NewInboundChannelAdapter(mockChan, "ref", "dlc", nil, nil, retryTimes, false)
+	if len(adapterInstance.RetryAttempts()) != 3 {
+		t.Error("RetryAttempts not set correctly")
+	}
+	if adapterInstance.RetryAttempts()[0] != 1 || adapterInstance.RetryAttempts()[1] != 2 || adapterInstance.RetryAttempts()[2] != 3 {
+		t.Error("RetryAttempts values not set correctly")
+	}
+}
+
+func TestInboundChannelAdapter_CommitMessage(t *testing.T) {
+	t.Parallel()
+	t.Run("should commit message successfully", func(t *testing.T) {
+		mockChan := &mockChannelCommitMessage{}
+		adapterInstance := adapter.NewInboundChannelAdapter(mockChan, "ref", "dlc", nil, nil, nil, false)
+		if err := adapterInstance.CommitMessage(nil); err != nil {
+			t.Errorf("Expected success on commit, got error: %v", err)
+		}
+	})
+	t.Run("should return nil when channel does not support commit", func(t *testing.T) {
+		mockChan := &mockConsumerChannel{}
+		adapterInstance := adapter.NewInboundChannelAdapter(mockChan, "ref", "dlc", nil, nil, nil, false)
+		if err := adapterInstance.CommitMessage(nil); err != nil {
+			t.Errorf("Expected success on commit, got error: %v", err)
 		}
 	})
 }

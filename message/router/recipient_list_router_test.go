@@ -110,4 +110,21 @@ func TestHandle(t *testing.T) {
 			t.Error("Channel referenced by ChannelName should receive the message")
 		}
 	})
+
+	t.Run("error when action channel does not publisher channel", func(t *testing.T) {
+		t.Parallel()
+		r := NewRecipientListRouter(container)
+		container.Set("invalidChannel", "invalid")
+		msg := message.NewMessageBuilderFromMessage(msg).
+			WithChannelName("invalidChannel").
+			WithRoute("rota1").
+			Build()
+		_, err := r.Handle(context.Background(), msg)
+		if err == nil {
+			t.Error("Handle should return an error when channel is not a publisher channel")
+		}
+		if err.Error() != "[recipient-list-router] unprocessable message, channel for action invalidChannel does not implement PublisherChannel" {
+			t.Errorf("Handle should return specific error message, got: %v", err)
+		}
+	})
 }

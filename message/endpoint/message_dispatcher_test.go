@@ -127,3 +127,18 @@ func TestPublishMessage(t *testing.T) {
 		}
 	})
 }
+
+func TestMessageDispatcher_MessageBuilder(t *testing.T) {
+	t.Parallel()
+	gw := endpoint.NewGateway(&dummyHandler{}, "", "channel")
+	dispatcher := endpoint.NewMessageDispatcher(gw)
+	builder := dispatcher.MessageBuilder(
+		message.Command,
+		"payload",
+		nil,
+	)
+	
+	if builder == nil {
+		t.Error("MessageBuilder should return a non-nil instance")
+	}
+}
