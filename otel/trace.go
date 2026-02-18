@@ -7,6 +7,7 @@ package otel
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/jeffersonbrasilino/gomes/message"
 	"go.opentelemetry.io/otel"
@@ -58,6 +59,7 @@ const (
 )
 
 var (
+	mu           sync.Mutex
 	traceEnabled bool = false
 	msMap             = map[MessageSystemType]string{
 		MessageSystemTypeActiveMQ:   "activemq",
@@ -92,6 +94,8 @@ var (
 
 // EnableTrace enables tracing for the message system.
 func EnableTrace() {
+	mu.Lock()
+	defer mu.Unlock()
 	traceEnabled = true
 }
 

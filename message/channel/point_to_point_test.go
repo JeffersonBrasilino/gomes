@@ -28,6 +28,7 @@ func TestNewPointToPointChannel(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		ch.Close()
+		ch.Close()
 	})
 }
 
@@ -131,6 +132,17 @@ func TestReceive(t *testing.T) {
 		_, err := ch.Receive(context.TODO())
 		if err.Error() != "channel has not been opened" {
 			t.Error("Receive should return error if channel is closed")
+		}
+	})
+
+	t.Run("should error when context is done", func(t *testing.T) {
+		t.Parallel()
+		ch := channel.NewPointToPointChannel("chan1")
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := ch.Receive(ctx)
+		if err.Error() != "context canceled" {
+			t.Error("Receive should return error if context is cancelled")
 		}
 	})
 }

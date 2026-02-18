@@ -7,6 +7,7 @@ import (
 
 	"github.com/jeffersonbrasilino/gomes/message"
 	"github.com/jeffersonbrasilino/gomes/message/adapter"
+	"github.com/jeffersonbrasilino/gomes/message/channel"
 )
 
 // mockPublisherChannel implements message.PublisherChannel for tests.
@@ -24,7 +25,11 @@ func (m *mockPublisherChannel) Name() string {
 	return "mockPublisherChannel"
 }
 
-func (m *mockPublisherChannel) Close() error {
+type mockClosableChannel struct {
+	*mockPublisherChannel
+}
+
+func (m *mockClosableChannel) Close() error {
 	return nil
 }
 
@@ -93,6 +98,7 @@ func TestOutboundChannelAdapterBuilder_BuildOutboundAdapter(t *testing.T) {
 	t.Parallel()
 	translator := &mockOutboundTranslator{}
 	builder := adapter.NewOutboundChannelAdapterBuilder("ref", "chan", translator)
+	builder.WithReplyChannelName("replychan")
 	pubChan := &mockPublisherChannel{}
 	chn, err := builder.BuildOutboundAdapter(pubChan)
 	if err != nil {
@@ -103,15 +109,17 @@ func TestOutboundChannelAdapterBuilder_BuildOutboundAdapter(t *testing.T) {
 	}
 }
 
+func TestOutboundChannelAdapter_Name(t *testing.T) {
+	t.Parallel()
+	translator := &mockOutboundTranslator{}
+	builder := adapter.NewOutboundChannelAdapterBuilder("ref", "chan", translator)
+	buiderInstance, _ := builder.BuildOutboundAdapter(&mockPublisherChannel{})
+	if buiderInstance.Name() != "mockPublisherChannel" {
+		t.Errorf("Expected Name 'mockPublisherChannel', got '%s'", buiderInstance.Name())
+	}
+}
+
 func TestOutboundChannelAdapter_Send(t *testing.T) {
-	msg := message.NewMessageBuilder().
-		WithChannelName("channel").
-		WithMessageType(message.Command).
-		WithPayload("payload").
-		Build()
-	pubChan := &mockPublisherChannel{}
-	adapterInstance := adapter.NewOutboundChannelAdapter(pubChan)
-	ctx := context.Background()
 	t.Run("success with payload", func(t *testing.T) {
 		t.Parallel()
 		msg := message.NewMessageBuilder().
@@ -120,7 +128,7 @@ func TestOutboundChannelAdapter_Send(t *testing.T) {
 			WithPayload("payload").
 			Build()
 		pubChan := &mockPublisherChannel{}
-		adapterInstance := adapter.NewOutboundChannelAdapter(pubChan)
+		adapterInstance := adapter.NewOutboundChannelAdapter(pubChan, "replyChann")
 
 		got := adapterInstance.Send(context.Background(), msg)
 		if got != nil {
@@ -128,13 +136,79 @@ func TestOutboundChannelAdapter_Send(t *testing.T) {
 		}
 	})
 
+	t.Run("success with Send Internal Channel", func(t *testing.T) {
+		t.Parallel()
+
+		internalChannel := channel.NewPointToPointChannel("internalChan")
+		msg := message.NewMessageBuilder().
+			WithChannelName("channel").
+			WithMessageType(message.Command).
+			WithPayload("payload").
+			WithInternalReplyChannel(internalChannel).
+			Build()
+		pubChan := &mockPublisherChannel{}
+
+		adapterInstance := adapter.NewOutboundChannelAdapter(pubChan, "replyChann")
+
+		go internalChannel.Receive(context.Background())
+
+		got := adapterInstance.Send(context.Background(), msg)
+		if got != nil {
+			t.Errorf("expected nil, got %v", got)
+		}
+
+		t.Cleanup(func() {
+			adapterInstance.Close()
+		})
+	})
+
 	t.Run("send error", func(t *testing.T) {
 		t.Parallel()
+		pubChan := &mockPublisherChannel{}
+
+		adapterInstance := adapter.NewOutboundChannelAdapter(pubChan, "replyChann")
+		ctx := context.Background()
+
+		internalChannel := channel.NewPointToPointChannel("internalChan")
+		go internalChannel.Receive(context.Background())
+
+		msg := message.NewMessageBuilder().
+			WithChannelName("channel").
+			WithMessageType(message.Command).
+			WithPayload("payload").
+			WithInternalReplyChannel(internalChannel).
+			Build()
 		pubChan.sendErr = errors.New("send error")
 		err := adapterInstance.Send(ctx, msg)
 		if err == nil {
 			t.Error("Expected error from publisher, got nil")
 		}
 		pubChan.sendErr = nil
+
+		t.Cleanup(func() {
+			adapterInstance.Close()
+		})
+	})
+}
+
+func TestOutboundChannelAdapter_Close(t *testing.T) {
+	t.Run("Close closable channel", func(t *testing.T) {
+		t.Parallel()
+		pubChan := &mockClosableChannel{&mockPublisherChannel{}}
+		adapterInstance := adapter.NewOutboundChannelAdapter(pubChan, "replyChann")
+		err := adapterInstance.Close()
+		if err != nil {
+			t.Errorf("Expected nil, got %v", err)
+		}
+	})
+
+	t.Run("Close unclosable channel", func(t *testing.T) {
+		t.Parallel()
+		pubChan := &mockPublisherChannel{}
+		adapterInstance := adapter.NewOutboundChannelAdapter(pubChan, "replyChann")
+		err := adapterInstance.Close()
+		if err != nil {
+			t.Errorf("Expected nil, got %v", err)
+		}
 	})
 }

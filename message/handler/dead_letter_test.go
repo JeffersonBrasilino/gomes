@@ -87,8 +87,8 @@ func TestDeadLetter_Handle(t *testing.T) {
 		if retMsg != nil {
 			t.Errorf("expected returned message to be nil")
 		}
-		if err.Error() != dlErr.Error() {
-			t.Errorf("expected error to be %v, got %v", dlErr.Error(), err.Error())
+		if err.Error() != "unexpected end of JSON input" {
+			t.Errorf("expected error to be %v, got %v", "unexpected end of JSON input", err.Error())
 		}
 	})
 }

@@ -14,7 +14,8 @@ import (
 
 // fakeInboundAdapter is a lightweight test double for InboundChannelAdapter.
 type fakeInboundAdapter struct {
-	ch *channel.PointToPointChannel
+	ch             *channel.PointToPointChannel
+	dlqChannelName string
 }
 
 func (f *fakeInboundAdapter) ReferenceName() string {
@@ -25,7 +26,7 @@ func (f *fakeInboundAdapter) ReferenceName() string {
 	return f.ch.Name()
 }
 func (f *fakeInboundAdapter) DeadLetterChannelName() string {
-	return ""
+	return f.dlqChannelName
 }
 func (f *fakeInboundAdapter) AfterProcessors() []message.MessageHandler {
 	return []message.MessageHandler{&dummyEventDrivenGatewayHandler{nil}}
@@ -59,7 +60,10 @@ func (f *fakeInboundAdapter) ReceiveMessage(ctx context.Context) (*message.Messa
 	return msg, nil
 }
 func (f *fakeInboundAdapter) SendReplyUsingReplyTo() bool {
-	return false
+	return true
+}
+func (f *fakeInboundAdapter) CommitMessage(msg *message.Message) error {
+	return nil
 }
 
 type dummyEventDrivenGatewayHandler struct {
@@ -75,6 +79,7 @@ func (d *dummyEventDrivenGatewayHandler) Handle(
 	}
 	time.Sleep(time.Second * 1)
 	if msg.GetPayload() == "payload error" {
+		fmt.Println("CUSPIU ERRO")
 		d.response <- fmt.Errorf("payload error")
 		return nil, fmt.Errorf("payload error")
 	}
@@ -86,7 +91,9 @@ func TestNewEventDrivenConsumerBuilder_Build(t *testing.T) {
 	t.Run("builds EventDrivenConsumer successfully", func(t *testing.T) {
 		t.Parallel()
 		cont := container.NewGenericContainer[any, any]()
-		in := &fakeInboundAdapter{nil}
+		cont.Set("dlq", channel.NewPointToPointChannel("dlq"))
+
+		in := &fakeInboundAdapter{nil, "dlq"}
 		cont.Set("ref", in)
 		got, err := endpoint.NewEventDrivenConsumerBuilder("ref").
 			Build(cont)
@@ -98,6 +105,7 @@ func TestNewEventDrivenConsumerBuilder_Build(t *testing.T) {
 			t.Error("Expected EventDrivenConsumer instance, got nil")
 		}
 	})
+
 	t.Run("Fails to build when gateway not found", func(t *testing.T) {
 		t.Parallel()
 		cont := container.NewGenericContainer[any, any]()
@@ -110,6 +118,7 @@ func TestNewEventDrivenConsumerBuilder_Build(t *testing.T) {
 			t.Errorf("Expected error '[event-driven-consumer] consumer channel ref not found.', got: %v", err)
 		}
 	})
+
 	t.Run("Fails to build when channel adapter is invalid", func(t *testing.T) {
 		t.Parallel()
 		cont := container.NewGenericContainer[any, any]()
@@ -123,6 +132,24 @@ func TestNewEventDrivenConsumerBuilder_Build(t *testing.T) {
 		}
 		if err == nil || err.Error() != "[event-driven-consumer] consumer channel ref is not a consumer channel." {
 			t.Errorf("Expected error '[event-driven-consumer] consumer channel ref is not a consumer channel.', got: %v", err)
+		}
+	})
+
+	t.Run("Fails to build when gateway builder is failed", func(t *testing.T) {
+		t.Parallel()
+		cont := container.NewGenericContainer[any, any]()
+
+		in := &fakeInboundAdapter{nil, "dlq"}
+		cont.Set("ref", in)
+		got, err := endpoint.NewEventDrivenConsumerBuilder("ref").
+			Build(cont)
+
+		if err == nil {
+			t.Errorf("Expected error, got success: %v", err)
+		}
+
+		if got != nil {
+			t.Error("Expected EventDrivenConsumer instance to be nil")
 		}
 	})
 }
@@ -146,6 +173,7 @@ func TestEventDrivenConsumer_Run(t *testing.T) {
 			WithChannelName("in").
 			WithMessageType(message.Command).
 			WithPayload("payload").
+			WithContext(ctx).
 			Build()
 		inChannel.Send(ctx, msg)
 
@@ -166,6 +194,7 @@ func TestEventDrivenConsumer_Run(t *testing.T) {
 			close(outChannel)
 		})
 	})
+
 	t.Run("Receive message Error", func(t *testing.T) {
 		t.Parallel()
 		inChannel := channel.NewPointToPointChannel("in")
@@ -194,6 +223,51 @@ func TestEventDrivenConsumer_Run(t *testing.T) {
 
 		if got == nil || got.Error() != "error receiving message" {
 			t.Errorf("expected error 'error receiving message', got: %v", got)
+		}
+
+		t.Cleanup(func() {
+			consumer.Stop()
+			close(outChannel)
+		})
+	})
+
+	t.Run("error when processing message", func(t *testing.T) {
+		t.Parallel()
+		inChannel := channel.NewPointToPointChannel("in")
+		outChannel := make(chan any)
+		in := &fakeInboundAdapter{ch: inChannel}
+
+		gw := endpoint.NewGateway(&dummyEventDrivenGatewayHandler{response: outChannel}, "", "")
+		consumer := endpoint.NewEventDrivenConsumer("ref", gw, in)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		errChan := make(chan error, 1)
+		go func() {
+			errChan <- consumer.Run(ctx)
+		}()
+
+		msg := message.NewMessageBuilder().
+			WithChannelName("in").
+			WithMessageType(message.Command).
+			WithPayload("payload error").
+			WithContext(ctx).
+			Build()
+
+		inChannel.Send(ctx, msg)
+
+		select {
+		case res := <-outChannel:
+			resMsg, ok := res.(error)
+			if !ok {
+				t.Errorf("expected a error, got: %v", res)
+			}
+			if resMsg.Error() != "payload error" {
+				t.Errorf("expected error 'payload error', got: %v", resMsg.Error())
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for handler response")
 		}
 
 		t.Cleanup(func() {

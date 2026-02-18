@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jeffersonbrasilino/gomes/message"
+	"github.com/jeffersonbrasilino/gomes/message/channel"
 )
 
 func TestMessageTypeString(t *testing.T) {
@@ -156,5 +157,14 @@ func TestMessage_ReplyRequired(t *testing.T) {
 				t.Errorf("%q: got %v, want %v", c.description, msg.ReplyRequired(), c.want)
 			}
 		})
+	}
+}
+
+func TestMessage_InternalReplyChannel(t *testing.T) {
+	msg := message.NewMessage(context.TODO(), "payload", nil)
+	msg.SetInternalReplyChannel(channel.NewPointToPointChannel("tst"))
+
+	if msg.GetInternalReplyChannel() == nil {
+		t.Error("Expected internal reply channel to be set, got nil")
 	}
 }
